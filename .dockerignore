@@ -1,0 +1,27 @@
+# Git / 
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Node
+node_modules
+npm-debug.log
+coverage
+
+# ( tsc  dist )
+dist
+
+# ()
+data
+reports
+logs
+tmp
+
+# 
+.env
+
+# 
+# (docker-compose  ./config  /app/config:ro )
+config

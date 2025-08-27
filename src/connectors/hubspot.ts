@@ -1,76 +1,65 @@
-import axios from "axios";
-import fs from "fs";
-import path from "path";
-import yaml from "js-yaml";
-import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import tz from "dayjs/plugin/timezone";
-dayjs.extend(utc); dayjs.extend(tz);
-
-const MOCK = String(process.env.MOCK_MODE || "").toLowerCase() === "true";
+// src/connectors/hubspot.ts
+// :Note.email→
 const HUBSPOT_TOKEN = process.env.HUBSPOT_PRIVATE_APP_TOKEN || "";
 
-type Member = { name: string; hubspotOwnerId: string; habiticaUserId: string; habiticaApiToken: string; };
-
-function loadSchedule() {
-  const p = path.resolve(process.cwd(), "config/schedule.yml");
-  const obj = yaml.load(fs.readFileSync(p, "utf-8")) as any;
-  return { timezone: obj?.timezone || "Asia/Tokyo" };
+async function hsFetch(url: string, init: RequestInit = {}) {
+  if (!HUBSPOT_TOKEN) throw new Error("HUBSPOT_PRIVATE_APP_TOKEN missing");
+  const headers = {
+    Authorization: `Bearer ${HUBSPOT_TOKEN}`,
+    "Content-Type": "application/json",
+    ...(init.headers || {}),
+  };
+  const res = await fetch(url, { ...init, headers });
+  const json = await res.json().catch(() => undefined);
+  if (!res.ok) {
+    const msg = JSON.stringify(json);
+    throw new Error(`HubSpot ${res.status}: ${msg}`);
+  }
+  return json;
 }
 
-export async function fetchDailyCallStats(dateISO: string, members: Member[]) {
-  // : { [ownerId]: { calls: number, minutes: number } }
-  const out: Record<string, { calls: number; minutes: number }> = {};
+/** Note() */
+export async function hsCreateNote(body: string) {
+  return hsFetch("https://api.hubapi.com/crm/v3/objects/notes", {
+    method: "POST",
+    body: JSON.stringify({
+      properties: { hs_note_body: body },
+    }),
+  });
+}
 
-  if (MOCK || !HUBSPOT_TOKEN || HUBSPOT_TOKEN.includes("private_app_access_token_here")) {
-    // ---- :(seed+owner) ----
-    const { timezone } = loadSchedule();
-    const seedBase = dayjs.tz(dateISO, timezone).format("YYYYMMDD");
-    members.forEach((m) => {
-      const seed = [...(seedBase + m.hubspotOwnerId)].reduce((a, c) => a + c.charCodeAt(0), 0);
-      const calls = 15 + (seed % 30);           // 15〜44
-      const minutes = 60 + (seed % 90);         // 60〜149
-      out[m.hubspotOwnerId] = { calls, minutes };
-    });
-    return out;
+/** email  → ID( undefined) */
+export async function hsFindContactIdByEmail(email: string): Promise<string | undefined> {
+  const res = await hsFetch("https://api.hubapi.com/crm/v3/objects/contacts/search", {
+    method: "POST",
+    body: JSON.stringify({
+      filterGroups: [
+        { filters: [{ propertyName: "email", operator: "EQ", value: email }] },
+      ],
+      properties: ["email"],
+      limit: 1,
+    }),
+  });
+  const id = res?.results?.[0]?.id;
+  return typeof id === "string" ? id : undefined;
+}
+
+/** Note  Contact (Note) */
+export async function hsAssociateNoteToContact(noteId: string, contactId: string) {
+  // v3 association API(note_to_contact )
+  const url = `https://api.hubapi.com/crm/v3/objects/notes/${noteId}/associations/contacts/${contactId}/note_to_contact`;
+  return hsFetch(url, { method: "PUT" });
+}
+
+/** :Note→()email */
+export async function hsCreateNoteOptionallyAssociate(body: string, email?: string) {
+  const note = await hsCreateNote(body);
+  const noteId = note?.id;
+  if (email && noteId) {
+    const cid = await hsFindContactIdByEmail(email).catch(() => undefined);
+    if (cid) {
+      await hsAssociateNoteToContact(noteId, cid).catch(() => undefined);
+    }
   }
-
-  // ---- :HubSpot Calls Search (1Owner) ----
-  const headers = { Authorization: `Bearer ${HUBSPOT_TOKEN}`, "Content-Type": "application/json" };
-  const { timezone } = loadSchedule();
-  const start = dayjs.tz(dateISO, timezone).startOf("day").utc().toISOString();
-  const end = dayjs.tz(dateISO, timezone).endOf("day").utc().toISOString();
-
-  for (const m of members) {
-    let after = undefined;
-    let calls = 0;
-    let minutes = 0;
-    do {
-      const body: any = {
-        filterGroups: [{
-          filters: [
-            { propertyName: "hs_timestamp", operator: "GTE", value: start },
-            { propertyName: "hs_timestamp", operator: "LTE", value: end },
-            { propertyName: "hubspot_owner_id", operator: "EQ", value: m.hubspotOwnerId },
-            { propertyName: "hs_call_status", operator: "EQ", value: "COMPLETED" }
-          ]
-        }],
-        properties: ["hs_call_duration", "hs_call_status", "hubspot_owner_id", "hs_timestamp"],
-        limit: 100,
-        after
-      };
-      const res = await axios.post("https://api.hubapi.com/crm/v3/objects/calls/search", body, { headers });
-      const results = res.data?.results || [];
-      for (const r of results) {
-        const durMs = Number(r.properties?.hs_call_duration ?? 0);
-        calls += 1;
-        minutes += Math.round(durMs / 1000 / 60); // 
-      }
-      after = res.data?.paging?.next?.after;
-    } while (after);
-
-    out[m.hubspotOwnerId] = { calls, minutes };
-  }
-
-  return out;
+  return note;
 }
