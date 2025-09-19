@@ -36,7 +36,7 @@ export async function createTodo(
     method: "POST",
     headers: h,
     body: JSON.stringify(body),
-  });
+  } as any);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Habitica createTodo ${res.status}: ${JSON.stringify(json)}`);
   return json.data; // { id, ... }
@@ -49,10 +49,17 @@ export async function completeTask(taskId: string, cred?: HabiticaCred) {
   const res = await fetch(`${BASE}/tasks/${taskId}/score/up`, {
     method: "POST",
     headers: h,
-  });
+  } as any);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`Habitica completeTask ${res.status}: ${JSON.stringify(json)}`);
   return json.data;
+}
+
+/** “”(ToDo) */
+export async function addBadge(cred: HabiticaCred, label: string, note?: string) {
+  const todo = await createTodo(`🏅 ${label}`, note ?? "badge", undefined, cred);
+  const id = (todo as any)?.id;
+  if (id) await completeTask(id, cred);
 }
 
 /** maker(To-Do→).count  */
@@ -62,24 +69,46 @@ export async function addMakerAward(cred: HabiticaCred, count = 1) {
     const id = (todo as any)?.id;
     if (id) await completeTask(id, cred);
   }
+  // (OK)
+  await addBadge(cred, "⚙ maker", "top maker of the day");
 }
 
-/** :approvalToDo(CSV) */
+/** appointment“”(XP/notes) */
+export async function addAppointment(
+  cred: HabiticaCred,
+  xp: number,
+  badgeLabel?: string
+) {
+  const title = `🟩 appointment +${xp}XP`;
+  const notes = `rule=appointment+${xp}`;
+  const todo = await createTodo(title, notes, undefined, cred);
+  const id = (todo as any)?.id;
+  if (id) await completeTask(id, cred);
+  if (badgeLabel) await addBadge(cred, badgeLabel, "appointment achieved");
+}
+
+/** :approval(CSV) */
 export async function addApproval(
   cred: HabiticaCred,
   amount: number,
   note?: string
 ) {
-  const title = `✅ approval ${Number(amount || 0).toLocaleString()}`;
-  return createTodo(title, note ?? "CSV", undefined, cred);
+  const title = `✅ approval +30XP`;
+  const notes = `rule=approval+30\n${note ?? "CSV"}`;
+  const todo = await createTodo(title, notes, undefined, cred);
+  const id = (todo as any)?.id;
+  if (id) await completeTask(id, cred);
 }
 
-/** :salesToDo(CSV) */
+/** :sales(CSV) */
 export async function addSales(
   cred: HabiticaCred,
   amount: number,
   note?: string
 ) {
-  const title = `💰 sales ${Number(amount || 0).toLocaleString()}`;
-  return createTodo(title, note ?? "CSV", undefined, cred);
+  const title = `💰 sales +50XP(¥${Number(amount || 0).toLocaleString()})`;
+  const notes = `rule=sales+50\n${note ?? "CSV"}`;
+  const todo = await createTodo(title, notes, undefined, cred);
+  const id = (todo as any)?.id;
+  if (id) await completeTask(id, cred);
 }
