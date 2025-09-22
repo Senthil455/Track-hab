@@ -25,16 +25,20 @@ export async function sendChatworkMessage(
   return { success: status >= 200 && status < 300, status, json };
 }
 
-/* ===== () ===== */
+/* =====  ===== */
 
+/** appointment(:info3,"") */
 export function cwApptText(actorName: string) {
   const n = actorName?.trim() || "assignee";
-  return [
-    `🔥 ${n} "appointment"💪🔥`,
-    `call📈 1💥`,
+  const body = [
+    "",
+    `🎉 ${n} "appointment"💪🔥`,
+    `call🙌 1💯`,
   ].join("\n");
+  return `[info]\n${body}\n[/info]`;
 }
 
+/** approval() */
 export function cwApprovalText(actorName: string, maker?: string) {
   const n = actorName?.trim() || "assignee";
   const m = maker ? `(maker:${maker})` : "";
@@ -44,6 +48,7 @@ export function cwApprovalText(actorName: string, maker?: string) {
   ].join("\n");
 }
 
+/** sales() */
 export function cwSalesText(actorName: string, amount?: number, maker?: string) {
   const n = actorName?.trim() || "assignee";
   const am = amount ? `¥${Math.max(0, Math.floor(amount)).toLocaleString()}` : "sales";
@@ -54,10 +59,13 @@ export function cwSalesText(actorName: string, amount?: number, maker?: string) 
   ].join("\n");
 }
 
-/**
- * maker()
- * - ,“”
- */
+/** CSV:( info ) */
+export function cwCsvSummaryText(today: string, ok: number, sales: number, maker: number) {
+  return `CSV(${today})
+approval ${ok} / sales ${sales} / maker ${maker}`;
+}
+
+/** maker:() */
 export function cwMakerAchievementText(
   actorName: string,
   maker?: string,
@@ -65,16 +73,11 @@ export function cwMakerAchievementText(
   totalSalesYen?: number
 ) {
   const n = actorName?.trim() || "assignee";
-  const lines = [
-    `🏆 ${n} "maker "🔥`,
-  ];
+  const lines = [`🏆 ${n} "maker "🔥`];
   if (maker) lines.push(`maker:${maker}`);
   if (typeof approvedCount === "number") lines.push(`approval:${approvedCount}`);
   if (typeof totalSalesYen === "number")
     lines.push(`sales:¥${Math.max(0, Math.floor(totalSalesYen)).toLocaleString()}`);
-  lines.push(
-    "",
-    `💪`
-  );
+  lines.push("", "💪");
   return lines.join("\n");
 }
