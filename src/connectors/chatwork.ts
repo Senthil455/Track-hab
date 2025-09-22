@@ -54,12 +54,27 @@ export function cwSalesText(actorName: string, amount?: number, maker?: string) 
   ].join("\n");
 }
 
-export function cwMakerAchievementText(actorName: string, maker?: string, approvedCount?: number, totalSalesYen?: number) {
+/**
+ * maker()
+ * - ,“”
+ */
+export function cwMakerAchievementText(
+  actorName: string,
+  maker?: string,
+  approvedCount?: number,
+  totalSalesYen?: number
+) {
   const n = actorName?.trim() || "assignee";
-  const lines = [`🏆 ${n} "maker "🔥`];
+  const lines = [
+    `🏆 ${n} "maker "🔥`,
+  ];
   if (maker) lines.push(`maker:${maker}`);
   if (typeof approvedCount === "number") lines.push(`approval:${approvedCount}`);
-  if (typeof totalSalesYen === "number") lines.push(`sales:¥${Math.max(0, Math.floor(totalSalesYen)).toLocaleString()}`);
-  lines.push("", "💪");
+  if (typeof totalSalesYen === "number")
+    lines.push(`sales:¥${Math.max(0, Math.floor(totalSalesYen)).toLocaleString()}`);
+  lines.push(
+    "",
+    `💪`
+  );
   return lines.join("\n");
 }
