@@ -93,21 +93,39 @@ export async function addApproval(
   amount: number,
   note?: string
 ) {
-  const title = `✅ approval +30XP`;
-  const notes = `rule=approval+30\n${note ?? "CSV"}`;
+  // :approval +30XP
+  const xp = 30;
+  const title = `✅ approval +${xp}XP`;
+  const notes = `rule=approval+${xp}\n${note ?? "CSV"}`;
   const todo = await createTodo(title, notes, undefined, cred);
   const id = (todo as any)?.id;
   if (id) await completeTask(id, cred);
 }
 
-/** :sales(CSV) */
+/** :sales(CSV)
+ *  :10() +50XP()
+ *   - SALES_XP_STEP_YEN:1( 100000)
+ *   - SALES_XP_PER_STEP:XP( 50)
+ */
 export async function addSales(
   cred: HabiticaCred,
   amount: number,
   note?: string
 ) {
-  const title = `💰 sales +50XP(¥${Number(amount || 0).toLocaleString()})`;
-  const notes = `rule=sales+50\n${note ?? "CSV"}`;
+  const stepYen   = Number(process.env.SALES_XP_STEP_YEN || 100000); // 10
+  const xpPerStep = Number(process.env.SALES_XP_PER_STEP || 50);     // 50XP/10
+  const amt       = Math.max(0, Number(amount || 0));
+  const steps     = Math.floor(amt / stepYen);
+  const xp        = steps * xpPerStep;
+
+  // 0〜XP(ToDo)
+  if (xp <= 0) {
+    console.log(`[habitica] addSales: amount=${amt} < step(${stepYen}); XP=0 → skip award`);
+    return { skipped: true, reason: "below_step" };
+  }
+
+  const title = `💰 sales +${xp}XP(¥${amt.toLocaleString()})`;
+  const notes = `rule=sales+${xp} (${xpPerStep}xp/${stepYen}yen)\n${note ?? "CSV"}`;
   const todo = await createTodo(title, notes, undefined, cred);
   const id = (todo as any)?.id;
   if (id) await completeTask(id, cred);
