@@ -1,4 +1,4 @@
-// src/features/csv_handlers.ts  —  server.ts (fixed)
+// src/features/csv_handlers.ts —  server.ts  CSV 
 import { Request, Response } from "express";
 import Busboy from "busboy";
 import { parse as csvParse } from "csv-parse/sync";
@@ -8,9 +8,9 @@ import {
   COMPANY_SALES_TO_ALL,
   CSV_UPLOAD_TOKENS,
   DRY_RUN,
-  REQUIRE_DXPORT_NAME,
   SALES_XP_PER_STEP,
   SALES_XP_STEP_YEN,
+  REQUIRE_DXPORT_NAME, // ←  env.ts ()
 } from "../lib/env.js";
 
 import {
@@ -82,6 +82,10 @@ export async function readCsvTextFromReq(req: Request): Promise<string> {
 
 /* ============================================================
  *  CSV ( server.ts )
+ *   assignee( or DXPORT  or email)()
+ *   "approval"
+ *   approval day 
+ *    sales 
  * ============================================================ */
 export function normalizeCsv(text: string) {
   const recs: any[] = csvParse(text, {
@@ -96,29 +100,44 @@ export function normalizeCsv(text: string) {
     "maker", "maker", "maker()", "", "brand", "maker", "", "", "maker()",
   ];
   const C_AMOUNT = [
-    "", "sales", "", "()", "()", "sales", "sales()", "sales()",
+    "", "sales", "", "()", "()",
+    "sales", "sales()", "sales()",
     "()", "amount", "price", "", "", "", "sales", "", "",
   ];
   const C_ID = ["id", "ID", "ID", "ID", "ID", "ID", "", "", ""];
   const C_APPR_DT = ["approval", "approval"];
   const C_STATUS = ["", "", ""];
 
-  type Out = { type: "approval" | "sales"; email?: string; name?: string; amount?: number; maker?: string; id?: string; date?: Date; notes?: string };
+  type Out = {
+    type: "approval" | "sales";
+    email?: string;
+    name?: string;
+    amount?: number;
+    maker?: string;
+    id?: string;
+    date?: Date;
+    notes?: string;
+  };
   const out: Out[] = [];
 
   for (const r of recs) {
+    // assignee
     const actor = resolveActorFromRow(r);
-    if (REQUIRE_DXPORT_NAME && !actor.name) continue;
+    if (REQUIRE_DXPORT_NAME && !actor.name) continue; // :
     if (!isInternal(actor.name, actor.email)) continue;
 
+    // =approval
     const kStatus = firstMatchKey(r, C_STATUS);
     if (kStatus) {
       const s = String(r[kStatus] || "").trim();
       const sLc = s.toLowerCase();
-      const ok = ["approval", "approved", "approve", "accepted", ""].some(t => s.includes(t) || sLc === t);
+      const ok = ["approval", "approved", "approve", "accepted", ""].some(
+        (t) => s.includes(t) || sLc === t
+      );
       if (!ok) continue;
     }
 
+    // approval()
     const kApprDt = firstMatchKey(r, C_APPR_DT);
     const dateStr = kApprDt ? String(r[kApprDt] || "").trim() : "";
     const apprAt = parseApprovalAt(dateStr);
@@ -141,10 +160,29 @@ export function normalizeCsv(text: string) {
 
     const rid = kId ? String(r[kId] || "").toString().trim() : undefined;
 
-    out.push({ type: "approval", email: actor.email, name: actor.name, maker, id: rid, date: apprAt, notes: "from CSV(approved)" });
+    // approval 1
+    out.push({
+      type: "approval",
+      email: actor.email,
+      name: actor.name,
+      maker,
+      id: rid,
+      date: apprAt,
+      notes: "from CSV(approved)",
+    });
 
+    //  sales 
     if (amount && amount > 0) {
-      out.push({ type: "sales", email: actor.email, name: actor.name, amount, maker, id: rid, date: apprAt, notes: "from CSV(approved+amount)" });
+      out.push({
+        type: "sales",
+        email: actor.email,
+        name: actor.name,
+        amount,
+        maker,
+        id: rid,
+        date: apprAt,
+        notes: "from CSV(approved+amount)",
+      });
     }
   }
 
@@ -165,12 +203,13 @@ function resolveActorFromRow(r: any): { name?: string; email?: string } {
   }
 
   const K_DX = [
-    "approval 23", "approval ", "DXPort", "DX PORT", "DXPortassignee", "",
-    "DX Port", "DXport", "dxport", "dx port", "", "(dxport)", "dxport ",
+    "approval 23", "approval ", "DXPort", "DX PORT", "DXPortassignee",
+    "", "DX Port", "DXport", "dxport", "dx port", "", "(dxport)", "dxport ",
   ];
   const C_EMAIL = [
     "email", "mail", "assignee", "assignee ", "assignee ", "assignee", "assigneeemail",
-    "owner email", " ", " ", "assignee", "assigneee-mail", "assigneee-mail", "assignee", "assignee",
+    "owner email", " ", " ", "assignee", "assigneee-mail", "assigneee-mail",
+    "assignee", "assignee",
   ];
 
   const kDx = firstMatchKey(r, K_DX);
@@ -199,22 +238,17 @@ function extractDxPortNameFromText(s?: string): string | undefined {
 }
 
 /* ============================================================
- *  ():Authorization: Bearer <token> or CSV_UPLOAD_TOKENS
+ *  (): Authorization: Bearer ... or CSV_UPLOAD_TOKENS
  * ============================================================ */
 function requireBearerCsv(req: Request, res: Response): boolean {
-  const token = (req.header("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  const allowList = String(CSV_UPLOAD_TOKENS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (!AUTH_TOKEN && allowList.length === 0) {
+  const auth = (req.header("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const token = auth || AUTH_TOKEN; // ← env 
+  const tokens = String(CSV_UPLOAD_TOKENS || "").split(",").map(s => s.trim()).filter(Boolean);
+  if (!AUTH_TOKEN && tokens.length === 0) {
     res.status(500).json({ ok: false, error: "missing tokens" });
     return false;
   }
-  if (token === AUTH_TOKEN) return true;
-  if (allowList.includes(token)) return true;
-
+  if (token && (token === AUTH_TOKEN || tokens.includes(token))) return true;
   res.status(401).json({ ok: false, error: "auth" });
   return false;
 }
@@ -236,7 +270,9 @@ function readKeySet(fp: string): Set<string> {
 }
 function appendKey(fp: string, k: string) { appendJsonl(fp, { k, at: new Date().toISOString() }); }
 function timeKey(d?: Date) { return d ? new Date(d).toISOString() : ""; } // UTC ISO
-function personKey(email?: string, name?: string) { return (email && email.trim()) ? `e:${email.toLowerCase()}` : `n:${String(name || "").replace(/\u3000/g, " ").trim()}`; }
+function personKey(email?: string, name?: string) {
+  return (email && email.trim()) ? `e:${email.toLowerCase()}` : `n:${String(name || "").replace(/\u3000/g, " ").trim()}`;
+}
 function keyApproval(args: { date?: Date; maker?: string; email?: string; name?: string }) {
   return `a|${timeKey(args.date)}|${String(args.maker || "").trim()}|${personKey(args.email, args.name)}`;
 }
@@ -362,7 +398,7 @@ function sumCompanyMonthlySalesAmount(month: string): number {
   return sum;
 }
 async function awardCompanyCumulativeForMonths(months: string[]) {
-  if (!COMPANY_SALES_TO_ALL) return; // ← boolean ()
+  if (!COMPANY_SALES_TO_ALL) return;
   const uniq = Array.from(new Set(months.filter(Boolean)));
   if (!uniq.length) return;
 
@@ -411,40 +447,22 @@ async function awardCompanyCumulativeForMonths(months: string[]) {
 }
 
 /* ============================================================
- *  ()— 
+ *  ()—  server.ts 
+ *    → headers  sample 
  * ============================================================ */
 export async function csvDetect(req: Request, res: Response) {
   const text = await readCsvTextFromReq(req);
   if (!text) return res.status(400).json({ ok: false, error: "empty CSV" });
 
-  const out = normalizeCsv(text);
-  const daySet = new Set(out.map((r) => isoDay(r.date)));
-  const monthSet = new Set(out.map((r) => isoMonth(r.date)));
-
-  let appr = 0, sales = 0;
-  const makerCount: Record<string, number> = {};
-  const salesSumByMaker: Record<string, number> = {};
-  for (const r of out) {
-    if (r.type === "approval") {
-      appr++; if (r.maker) makerCount[r.maker] = (makerCount[r.maker] || 0) + 1;
-    }
-    if (r.type === "sales" && r.amount) {
-      sales++; const m = r.maker || "(unknown)";
-      salesSumByMaker[m] = (salesSumByMaker[m] || 0) + r.amount;
-    }
-  }
-
-  res.json({
-    ok: true,
-    rows: out.length,
-    days: Array.from(daySet),
-    months: Array.from(monthSet),
-    approvals: appr,
-    sales,
-    makers: Object.keys(makerCount).length,
-    makerCount,
-    salesSumByMaker,
+  const rows: any[] = csvParse(text, {
+    columns: true,
+    bom: true,
+    skip_empty_lines: true,
+    trim: true,
+    relax_column_count: true,
   });
+  const heads = rows.length ? Object.keys(rows[0]) : [];
+  res.json({ ok: true, rows: rows.length, headers: heads, sample: rows.slice(0, 3) });
 }
 
 /* ============================================================
@@ -458,11 +476,14 @@ export async function csvUpsert(req: Request, res: Response) {
 
   const normalized = normalizeCsv(text);
 
+  // 
   const seenAppr = readKeySet(FP_IDX_APPR);
   const seenSales = readKeySet(FP_IDX_SALES);
 
+  // 
   let nA = 0, nS = 0, nM = 0, sum = 0, dup = 0;
 
+  // 
   const touched: SalesTouched[] = [];
   const touchedMonths = new Set<string>();
 
@@ -489,6 +510,7 @@ export async function csvUpsert(req: Request, res: Response) {
         const cred = getHabitica(email);
         if (cred) await habSafe(() => addApproval(cred, 1, "CSV").then(() => undefined as any));
       }
+      //  Chatwork ()
     }
 
     if (r.type === "sales" && amount && amount > 0) {
@@ -499,17 +521,18 @@ export async function csvUpsert(req: Request, res: Response) {
       nS++; sum += amount;
       appendJsonl("data/events/sales.jsonl", { at: new Date().toISOString(), day, email, actor: { name: actorName, email }, id, maker, amount });
 
+      // 
       if (email && maker) touched.push({ month: monthFromDay(day), email, maker });
       touchedMonths.add(month);
 
-      // ,()
+      // :.
       if (!DRY_RUN) {
         const cred = getHabitica(email);
-        const stepYen = Number(SALES_XP_STEP_YEN || 100000);
-        if (cred && amount < stepYen) {
+        if (cred && amount < Number(SALES_XP_STEP_YEN || 100000)) {
           await habSafe(() => addSales(cred, amount, "CSV (per-row < step)").then(() => undefined as any));
         }
       }
+      //  Chatwork ()
     }
   }
 
@@ -524,7 +547,7 @@ export async function csvUpsert(req: Request, res: Response) {
   // ===== maker() =====
   try {
     const today = isoDay();
-    const apprsToday = readJsonlAll("data/events/approvals.jsonl").filter((x: any) => String(x.day || "") === today);
+    const apprsToday = readJsonlAll("data/events/approvals.jsonl").filter(x => String(x.day || "") === today);
 
     type Entry = { name: string; email?: string; makerCounts: Record<string, number> };
     const byActor: Record<string, Entry> = {};
@@ -586,7 +609,7 @@ export async function csvUpsert(req: Request, res: Response) {
       const byActor: Record<string, Entry> = {};
 
       const apprsAll = readJsonlAll("data/events/approvals.jsonl");
-      const apprsMonth = apprsAll.filter((x: any) => String(x.day || "").slice(0, 7) === monthKey);
+      const apprsMonth = apprsAll.filter(x => String(x.day || "").slice(0, 7) === monthKey);
 
       const actorKey = (a: any) => (String(a?.actor?.email || a?.email || "") || dispNameFromMap(a, MAIL2NAME)).toLowerCase();
       for (const a of apprsMonth) {
