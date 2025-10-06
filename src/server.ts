@@ -13,6 +13,10 @@ import {
 import { log } from "./lib/utils.js";
 import { HAB_MAP, NAME2MAIL } from "./lib/maps.js";
 
+// ▼▼▼ : API()
+import { rulesGet, rulesPut, statsToday } from "./routes/rules.js";
+// ▲▲▲ 
+
 /*  */
 const app = express();
 app.set("x-powered-by", false);
@@ -74,6 +78,11 @@ app.post("/admin/csv", express.text({ type: "text/csv", limit: "20mb" }), csvUps
 import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 app.get("/admin/dashboard", dashboardHandler);
 app.get("/admin/mapping", mappingHandler);
+
+//  API()
+app.get("/tenant/:id/rules", rulesGet);
+app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
+app.get("/tenant/:id/stats/today", statsToday);
 
 /* Start server */
 app.listen(PORT, () => {
