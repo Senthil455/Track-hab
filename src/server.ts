@@ -13,9 +13,8 @@ import {
 import { log } from "./lib/utils.js";
 import { HAB_MAP, NAME2MAIL } from "./lib/maps.js";
 
-// ▼▼▼ : API()
+// API()
 import { rulesGet, rulesPut, statsToday } from "./routes/rules.js";
-// ▲▲▲ 
 
 /*  */
 const app = express();
@@ -28,14 +27,23 @@ app.use(
     },
   })
 );
+
+// ===== CORS()=====
+// fetch ,PUT  /tenant/*, /healthz 
 app.use((req, res, next) => {
-  if (req.path.startsWith("/admin/")) {
+  if (
+    req.path.startsWith("/admin/") ||
+    req.path.startsWith("/tenant/") ||
+    req.path === "/healthz"
+  ) {
+    //  Origin (* OK)
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader(
       "Access-Control-Allow-Headers",
       "Authorization, Content-Type, X-Authorization"
     );
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "86400");
     if (req.method === "OPTIONS") return res.status(204).end();
   }
   next();
@@ -72,14 +80,14 @@ app.post("/webhooks/habitica", habiticaWebhook);
 /* CSV routes */
 import { csvDetect, csvUpsert } from "./features/csv_handlers.js";
 app.post("/admin/csv/detect", express.text({ type: "text/csv", limit: "20mb" }), csvDetect);
-app.post("/admin/csv", express.text({ type: "text/csv", limit: "20mb" }), csvUpsert);
+app.post("/admin/csv",        express.text({ type: "text/csv", limit: "20mb" }), csvUpsert);
 
 /* Admin UI */
 import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 app.get("/admin/dashboard", dashboardHandler);
-app.get("/admin/mapping", mappingHandler);
+app.get("/admin/mapping",   mappingHandler);
 
-//  API()
+// API()
 app.get("/tenant/:id/rules", rulesGet);
 app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
 app.get("/tenant/:id/stats/today", statsToday);
