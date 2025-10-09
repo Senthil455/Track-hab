@@ -9,7 +9,6 @@ import {
   APPOINTMENT_XP,
   DRY_RUN,
 } from "../lib/env.js";
-
 import { appendJsonl, fmtJST, log } from "../lib/utils.js";
 import { resolveActor } from "./resolveActor.js";
 import { getHabitica } from "../lib/maps.js";
@@ -17,25 +16,24 @@ import { habSafe } from "../lib/habiticaQueue.js";
 import { addAppointment } from "../connectors/habitica.js"; // XP
 import { sendChatworkMessage, cwApptText } from "../connectors/chatwork.js";
 import { hasSeen, markSeen } from "../lib/seen.js";
-
-// UIAPI
 import {
   getObservedLabelIds,
   getObservedLabelTitles,
-  getLabelItems, // UI items(id/title/xp/enabled/badge/category)
+  getLabelItems,
 } from "../store/labels.js";
 
-// 
 const asStr = (v: unknown) => "" + (v ?? "");
 const lc = (v: unknown) => asStr(v).toLowerCase();
+const arr = (v: any): any[] =>
+  Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : []);
 
 type LabelItem = {
   id?: string;
   title?: string;
-  category?: string;   //  "label" / "appointment"
+  category?: string;   // "appointment" / "label"
   enabled?: boolean;
-  xp?: number;         // XP
-  badge?: string;      // Habitica( title/category)
+  xp?: number;
+  badge?: string;
 };
 
 export type Normalized = {
@@ -48,7 +46,7 @@ export type Normalized = {
   tenant?: string;       //  default
 };
 
-/** HubSpot  ID (raw) */
+/** HubSpot  ID  */
 function pickHubSpotLikeIds(raw: any): string[] {
   const out: string[] = [];
   const push = (v: unknown) => {
@@ -78,12 +76,17 @@ function pickHubSpotLikeIds(raw: any): string[] {
   return out.filter(Boolean).map(asStr);
 }
 
-/** UI  items . observed  ID/ appointment  */
+/** UI items . observed  ID/. */
 async function loadUiLabels(tenant: string): Promise<LabelItem[]> {
-  try {
-    const items = (await getLabelItems(tenant)) ?? [];
-    // 
-    return (items as any[]).map((it) => ({
+  const [itemsRaw, idsRaw, titlesRaw] = await Promise.all([
+    getLabelItems(tenant).catch(() => null),
+    getObservedLabelIds(tenant).catch(() => null),
+    getObservedLabelTitles(tenant).catch(() => null),
+  ]);
+
+  const items = arr(itemsRaw);
+  if (items.length) {
+    return items.map((it: any) => ({
       id: it?.id ? asStr(it.id) : undefined,
       title: it?.title ? asStr(it.title) : undefined,
       category: it?.category ? lc(it.category) : (it?.title || it?.id ? "appointment" : "label"),
@@ -91,15 +94,15 @@ async function loadUiLabels(tenant: string): Promise<LabelItem[]> {
       xp: Number.isFinite(Number(it?.xp)) ? Math.max(0, Math.floor(Number(it?.xp))) : undefined,
       badge: it?.badge ? asStr(it.badge) : undefined,
     }));
-  } catch {
-    // :ID/ appointment 
-    const ids = ((await getObservedLabelIds(tenant)) ?? []).map(asStr);
-    const titles = ((await getObservedLabelTitles(tenant)) ?? []).map(asStr);
-    return [
-      ...ids.map((id) => ({ id, category: "appointment", enabled: true } as LabelItem)),
-      ...titles.map((title) => ({ title, category: "appointment", enabled: true } as LabelItem)),
-    ];
   }
+
+  // :observed  ID/
+  const ids = arr(idsRaw).map(asStr);
+  const titles = arr(titlesRaw).map(asStr);
+  return [
+    ...ids.map((id) => ({ id, category: "appointment", enabled: true } as LabelItem)),
+    ...titles.map((title) => ({ title, category: "appointment", enabled: true } as LabelItem)),
+  ];
 }
 
 function uniq(items: LabelItem[]): LabelItem[] {
@@ -138,7 +141,11 @@ async function matchUiLabels(tenant: string, outcomeText: string, idCands: strin
 /** ENV(APPOINTMENT_VALUES) appointment */
 function matchEnvAppointment(outcomeText: string): boolean {
   const t = lc(outcomeText).trim();
-  return !!t && (APPOINTMENT_VALUES ?? []).map(lc).includes(t);
+  const envValsRaw: any = APPOINTMENT_VALUES;
+  const envVals = Array.isArray(envValsRaw)
+    ? envValsRaw
+    : (typeof envValsRaw === "string" ? envValsRaw.split(",") : []);
+  return !!t && envVals.map(lc).includes(t);
 }
 
 /** : */
@@ -163,7 +170,7 @@ export async function handleNormalizedEvent(ev: Normalized) {
       await awardXpForLabel(ev, m);
     }
   } else if (hasUiAppointment || envAppt) {
-    // UIXP"appointment" ENV appointment → appointmentXP + Chatwork
+    // UIXP"appointment" ENVappointment → appointmentXP + Chatwork
     await awardXpForAppointment(ev);
     await notifyChatworkAppointment(ev);
   }
