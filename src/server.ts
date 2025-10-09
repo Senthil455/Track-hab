@@ -28,11 +28,7 @@ import { csvDetect, csvUpsert } from "./features/csv_handlers.js";
 // Admin UI()
 import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 
-// ▼ ()
-import {
-  getObservedLabelIds,
-  getObservedLabelTitles,
-} from "./store/labels.js";
+// ()
 import { labelsGet, labelsPut } from "./routes/labels.js";
 
 /*  */
@@ -47,8 +43,7 @@ app.use(
   })
 );
 
-// ===== CORS()=====
-// fetch ,PUT  /tenant/*, /healthz 
+// ===== CORS:/admin/*, /tenant/*, /healthz  =====
 app.use((req, res, next) => {
   if (
     req.path.startsWith("/admin/") ||
@@ -71,7 +66,7 @@ app.use((req, res, next) => {
 app.get("/healthz", (_req, res) => {
   res.json({
     ok: true,
-    version: "2025-10-07-spec-v1.5",
+    version: "2025-10-09-ui-labels-v2",
     tz: process.env.TZ || "Asia/Tokyo",
     now: new Date().toISOString(),
     baseUrl: PUBLIC_BASE_URL || null,
@@ -84,13 +79,13 @@ app.get("/healthz", (_req, res) => {
 });
 app.get("/support", (_req, res) => res.type("text/plain").send("Support page"));
 
-/* Webhook routes() */
+// Webhooks
 app.post("/webhooks/hubspot", hubspotWebhook);
 app.post("/webhooks/workflow", workflowWebhook);
 app.post("/webhooks/zoom", zoomWebhook);
 app.post("/webhooks/habitica", habiticaWebhook);
 
-/* CSV routes() */
+// CSV
 app.post(
   "/admin/csv/detect",
   express.text({ type: "text/csv", limit: "20mb" }),
@@ -102,20 +97,20 @@ app.post(
   csvUpsert
 );
 
-/* Admin UI() */
+// Admin UI
 app.get("/admin/dashboard", dashboardHandler);
 app.get("/admin/mapping", mappingHandler);
 
-/* () */
+// 
 app.get("/tenant/:id/rules", rulesGet);
 app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
 app.get("/tenant/:id/stats/today", statsTodayBase);
 
-/*  API() */
+// ()
 app.get("/tenant/:id/labels", labelsGet);
 app.put("/tenant/:id/labels", express.json({ limit: "1mb" }), labelsPut);
 
-/* Start server */
+/* Start */
 app.listen(PORT, () => {
   log(
     `listening :${PORT} DRY_RUN=${DRY_RUN} totalize=${CALL_TOTALIZE_5MIN} unit=${CALL_XP_UNIT_MS}ms per5min=${CALL_XP_PER_5MIN} perCall=${CALL_XP_PER_CALL}`
@@ -123,6 +118,5 @@ app.listen(PORT, () => {
   log(
     `[habitica] users=${Object.keys(HAB_MAP).length}, [name->email] entries=${Object.keys(NAME2MAIL).length}`
   );
-  log(`[env] APPOINTMENT_VALUES=${JSON.stringify(APPOINTMENT_VALUES)}`);
 });
 export {};

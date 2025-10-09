@@ -1,132 +1,100 @@
 // src/store/labels.ts
-import fs from "fs";
+import { promises as fs } from "fs";
 import path from "path";
+import { APPOINTMENT_VALUES } from "../lib/env.js";
 
 export type LabelItem = {
-  id?: string;           // HubSpot ID
-  title?: string;        // ()
-  category?: string;     // : "appointment" | "no_need" | "prospect_a" 
-  enabled?: boolean;     // false 
-  xp?: number;           // XP(0/XP)
-  badge?: string;        // Habitica/( or )
+  id: string;           // HubSpot ID()
+  title: string;        // ()
+  enabled?: boolean;    // 
+  xp?: number;          // XP()
+  badge?: string;       // Habitica()
 };
 
-type LegacyDoc = { ids?: string[]; titles?: string[]; updatedAt?: string };
-type LabelsDoc = {
-  tenant: string;
-  items: LabelItem[];    // ()
-  // 
-  ids?: string[];
-  titles?: string[];
-  updatedAt: string;
-};
+type LabelDoc = { items: LabelItem[]; updatedAt: string };
+
+const MEM = new Map<string, LabelDoc>(); // tenant -> doc
 
 function fileOf(tenant: string) {
-  const safe = (tenant || "default").replace(/[^\w.-]+/g, "_");
-  const dir = path.join(process.cwd(), "data", "tenants", safe);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return path.join(dir, "labels.json");
+  return path.join("data", "tenants", tenant, "labels.json");
 }
 
-function readDoc(tenant: string): LabelsDoc {
-  const f = fileOf(tenant);
-  if (!fs.existsSync(f)) {
-    return { tenant, items: [], updatedAt: new Date().toISOString() };
-  }
+async function ensureDirFor(file: string) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+}
+
+async function readJSON<T>(file: string): Promise<T | null> {
   try {
-    const j = JSON.parse(fs.readFileSync(f, "utf8")) as Partial<LabelsDoc & LegacyDoc>;
-    const items: LabelItem[] = Array.isArray((j as any).items) ? (j as any).items : [];
-    const legacyIds = Array.isArray(j.ids) ? j.ids.map(String) : [];
-    const legacyTitles = Array.isArray(j.titles) ? j.titles.map(String) : [];
-
-    // UI ids/titles  appointment (XP)
-    const merged: LabelItem[] = [
-      ...items,
-      ...legacyIds.map((id) => ({ id, category: "appointment" as const })),
-      ...legacyTitles.map((title) => ({ title, category: "appointment" as const })),
-    ];
-
-    return {
-      tenant,
-      items: dedupeItems(merged),
-      ids: j.ids || [],
-      titles: j.titles || [],
-      updatedAt: typeof j.updatedAt === "string" ? j.updatedAt : new Date().toISOString(),
-    };
+    const s = await fs.readFile(file, "utf8");
+    return JSON.parse(s) as T;
   } catch {
-    return { tenant, items: [], updatedAt: new Date().toISOString() };
+    return null;
   }
 }
 
-function writeDoc(doc: LabelsDoc) {
-  const f = fileOf(doc.tenant);
-  fs.writeFileSync(
-    f,
-    JSON.stringify(
-      {
-        tenant: doc.tenant,
-        items: dedupeItems(doc.items || []),
-        updatedAt: new Date().toISOString(),
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
+async function writeJSON(file: string, obj: any) {
+  await ensureDirFor(file);
+  await fs.writeFile(file, JSON.stringify(obj, null, 2), "utf8");
 }
 
-function dedupeItems(items: LabelItem[]): LabelItem[] {
-  const seen = new Set<string>();
-  const out: LabelItem[] = [];
-  for (const it of items) {
-    const key = `${(it.category || "appointment").toLowerCase()}|${(it.id || "").trim()}|${(it.title || "").trim().toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      id: it.id ? String(it.id).trim() : undefined,
-      title: it.title ? String(it.title).trim() : undefined,
-      category: (it.category || "appointment").toLowerCase(),
-      enabled: it.enabled !== false,
-      xp: isFinite(Number(it.xp)) ? Math.max(0, Math.floor(Number(it.xp))) : undefined,
-      badge: it.badge ? String(it.badge) : undefined,
-    });
-  }
-  return out.slice(0, 2000);
+function fallbackFromEnv(): LabelDoc {
+  // :env.APPOINTMENT_VALUES ,
+  const items = (APPOINTMENT_VALUES || []).map((k) => ({
+    id: k,
+    title: k,
+    enabled: true,
+    xp: undefined,
+    badge: undefined,
+  }));
+  return { items, updatedAt: new Date().toISOString() };
 }
 
-export function setLabelItems(tenant: string, items: LabelItem[]) {
-  const base = readDoc(tenant);
-  base.items = dedupeItems(items || []);
-  writeDoc(base);
+export async function loadLabels(tenant: string): Promise<LabelDoc> {
+  if (MEM.has(tenant)) return MEM.get(tenant)!;
+  const file = fileOf(tenant);
+  const j = await readJSON<LabelDoc>(file);
+  const doc = j ?? fallbackFromEnv();
+  MEM.set(tenant, doc);
+  return doc;
 }
 
-export function setObservedLabels(tenant: string, ids: string[], titles: string[]) {
-  const base = readDoc(tenant);
-  const add: LabelItem[] = [
-    ...ids.map((id) => ({ id, category: "appointment" as const })),
-    ...titles.map((title) => ({ title, category: "appointment" as const })),
-  ];
-  base.items = dedupeItems([...(base.items || []), ...add]);
-  writeDoc(base);
+export async function saveLabels(tenant: string, items: LabelItem[]) {
+  const cleaned = (items || [])
+    .filter((x) => x && String(x.id || "").trim() && String(x.title || "").trim())
+    .map((x) => ({
+      id: String(x.id).trim(),
+      title: String(x.title).trim(),
+      enabled: !!x.enabled,
+      xp: Number.isFinite(Number(x.xp)) ? Number(x.xp) : undefined,
+      badge: x.badge ? String(x.badge) : undefined,
+    }));
+  const doc: LabelDoc = { items: cleaned, updatedAt: new Date().toISOString() };
+  MEM.set(tenant, doc);
+  await writeJSON(fileOf(tenant), doc);
+  return doc;
 }
 
-export function getLabelItems(tenant: string): LabelItem[] {
-  return readDoc(tenant).items.filter((x) => x.enabled !== false);
+/** : ID */
+export async function getObservedLabelIds(tenant: string): Promise<string[]> {
+  const { items } = await loadLabels(tenant);
+  return items.filter((x) => x.enabled).map((x) => x.id);
 }
 
-export function getObservedLabelIds(tenant: string): string[] {
-  return getLabelItems(tenant)
-    .filter((x) => (x.category || "appointment").toLowerCase() === "appointment" && x.id)
-    .map((x) => x.id!) as string[];
+/** : ID ->   */
+export async function getObservedLabelTitles(tenant: string): Promise<Record<string, string>> {
+  const { items } = await loadLabels(tenant);
+  const m: Record<string, string> = {};
+  for (const it of items) m[it.id] = it.title;
+  return m;
 }
 
-export function getObservedLabelTitles(tenant: string): string[] {
-  return getLabelItems(tenant)
-    .filter((x) => (x.category || "appointment").toLowerCase() === "appointment" && x.title)
-    .map((x) => x.title!.toLowerCase());
-}
-
-export function getLabelItemsByCategory(tenant: string, category: string): LabelItem[] {
-  const c = String(category || "").toLowerCase();
-  return getLabelItems(tenant).filter((x) => (x.category || "appointment").toLowerCase() === c);
+/** XP/: ID */
+export async function lookupXpConfig(tenant: string, id: string): Promise<{
+  xp?: number;
+  badge?: string;
+} | undefined> {
+  const { items } = await loadLabels(tenant);
+  const hit = items.find((x) => x.id === id && x.enabled);
+  if (!hit) return undefined;
+  return { xp: hit.xp, badge: hit.badge };
 }
