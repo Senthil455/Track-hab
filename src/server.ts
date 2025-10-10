@@ -1,6 +1,7 @@
 // src/server.ts
 import express from "express";
 import path from "path";
+import fs from "fs";
 
 import {
   PORT,
@@ -16,11 +17,7 @@ import { log } from "./lib/utils.js";
 import { HAB_MAP, NAME2MAIL } from "./lib/maps.js";
 
 // API()
-import {
-  rulesGet,
-  rulesPut,
-  statsToday as statsTodayBase,
-} from "./routes/rules.js";
+import { rulesGet, rulesPut, statsToday as statsTodayBase } from "./routes/rules.js";
 
 // Webhook()
 import { hubspotWebhook } from "./features/hubspot.js";
@@ -38,23 +35,15 @@ import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 import { labelsGet, labelsPut } from "./routes/labels.js";
 
 /* =========================
-   public-admin 
-   - import.meta  CWD 
-   - Render/Node  CWD 
-   ========================= */
-const PUBLIC_ADMIN_DIR = path.resolve(process.cwd(), "public-admin");
-
-/* =========================
    ()
-   -  SGC_TOKENS  JSON (:{"default":"tok_edit_xxx","*":"tok_view_ro"})
-   - PUT (GET )
+   -  SGC_TOKENS  JSON → 
+     : {"":"wabisabi-habitica-hubspot-connection", "*":"wabisabi-habitica-hubspot-connection"}
+   - PUT (GET)
    ========================= */
 type AnyReq = any;
 
 function tenantFrom(req: AnyReq): string {
-  return (
-    String(req.params?.id || req.query?.tenant || "default").trim() || "default"
-  );
+  return String(req.params?.id || req.query?.tenant || "default").trim() || "default";
 }
 function getTokenFromHeaders(req: AnyReq): string {
   const raw = req.get("authorization") || req.get("x-authorization") || "";
@@ -77,39 +66,55 @@ function requireEditorToken(req: AnyReq, res: AnyReq, next: AnyReq) {
   next();
 }
 
+/* ===== UI =====
+   - prod: dist/public-admin/console.html
+   - dev : src/public-admin/console.html
+   .import.meta .
+*/
+function resolvePublicAdminDir(): string {
+  const candidates = [
+    path.resolve(process.cwd(), "dist", "public-admin"),
+    path.resolve(process.cwd(), "src", "public-admin"),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, "console.html"))) return dir;
+  }
+  // ( 404 )
+  return candidates[0];
+}
+const PUBLIC_ADMIN_DIR = resolvePublicAdminDir();
+
 /*  */
 const app = express();
 app.set("x-powered-by", false);
 app.set("trust proxy", true);
 
-/* JSON (webhook  rawBody ) */
+// JSON(rawBody)
 app.use(
   express.json({
-    verify: (req: AnyReq, _res: AnyReq, buf: Buffer) => {
-      (req as AnyReq).rawBody = Buffer.from(buf);
+    verify: (req: any, _res: any, buf: Buffer) => {
+      (req as any).rawBody = Buffer.from(buf);
     },
   })
 );
 
-/* === CORS: (/tenant/* /admin/* ) === */
-app.use((_req, res, next) => {
+// === CORS: ( /tenant/* /admin/*) ===
+app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Authorization, Content-Type, X-Authorization"
-  );
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Authorization");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
   res.setHeader("Access-Control-Max-Age", "86400");
-  next();
-});
-app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
 
-/* ===== (1UI)
-   https://<host>/admin/console/  public-admin/console.html  */
-app.use("/admin/console", express.static(PUBLIC_ADMIN_DIR));
+/* ===== (1UI) =====
+   https://<host>/admin/console/  console.html 
+*/
+app.use("/admin/console", express.static(PUBLIC_ADMIN_DIR, { index: "console.html", extensions: ["html"] }));
+app.get("/admin/console/*", (_req, res) => {
+  res.sendFile(path.join(PUBLIC_ADMIN_DIR, "console.html"));
+});
 
 /* Health / Support */
 app.get("/healthz", (_req, res) => {
@@ -124,9 +129,8 @@ app.get("/healthz", (_req, res) => {
     nameMapCount: Object.keys(NAME2MAIL).length,
     apptValues: APPOINTMENT_VALUES,
     totalize: CALL_TOTALIZE_5MIN,
-    xpUnitMs: CALL_XP_UNIT_MS,
-    per5min: CALL_XP_PER_5MIN,
-    perCall: CALL_XP_PER_CALL,
+    publicAdminDirExists: fs.existsSync(path.join(PUBLIC_ADMIN_DIR, "console.html")),
+    publicAdminDir: PUBLIC_ADMIN_DIR,
   });
 });
 app.get("/support", (_req, res) => res.type("text/plain").send("Support page"));
@@ -138,48 +142,28 @@ app.post("/webhooks/zoom", zoomWebhook);
 app.post("/webhooks/habitica", habiticaWebhook);
 
 /* CSV() */
-app.post(
-  "/admin/csv/detect",
-  express.text({ type: "text/csv", limit: "20mb" }),
-  csvDetect
-);
-app.post(
-  "/admin/csv",
-  express.text({ type: "text/csv", limit: "20mb" }),
-  csvUpsert
-);
+app.post("/admin/csv/detect", express.text({ type: "text/csv", limit: "20mb" }), csvDetect);
+app.post("/admin/csv", express.text({ type: "text/csv", limit: "20mb" }), csvUpsert);
 
 /* Admin UI() */
 app.get("/admin/dashboard", dashboardHandler);
 app.get("/admin/mapping", mappingHandler);
 
-/* (UI)— GET ,PUT  */
+/* (UI)— GET,PUT */
 app.get("/tenant/:id/rules", rulesGet);
-app.put(
-  "/tenant/:id/rules",
-  requireEditorToken,
-  express.json({ limit: "1mb" }),
-  rulesPut
-);
+app.put("/tenant/:id/rules", requireEditorToken, express.json({ limit: "1mb" }), rulesPut);
 app.get("/tenant/:id/stats/today", statsTodayBase);
 
-/* (UI)— GET ,PUT  */
+/* (UI)— GET,PUT */
 app.get("/tenant/:id/labels", labelsGet);
-app.put(
-  "/tenant/:id/labels",
-  requireEditorToken,
-  express.json({ limit: "1mb" }),
-  labelsPut
-);
+app.put("/tenant/:id/labels", requireEditorToken, express.json({ limit: "1mb" }), labelsPut);
 
 /* Start */
 app.listen(PORT, () => {
   log(
     `listening :${PORT} DRY_RUN=${DRY_RUN} totalize=${CALL_TOTALIZE_5MIN} unit=${CALL_XP_UNIT_MS}ms per5min=${CALL_XP_PER_5MIN} perCall=${CALL_XP_PER_CALL}`
   );
-  log(
-    `[habitica] users=${Object.keys(HAB_MAP).length}, [name->email] entries=${Object.keys(NAME2MAIL).length}`
-  );
+  log(`[habitica] users=${Object.keys(HAB_MAP).length}, [name->email] entries=${Object.keys(NAME2MAIL).length}`);
+  log(`[admin] console at /admin/console/ from ${PUBLIC_ADMIN_DIR}`);
 });
-
 export {};
