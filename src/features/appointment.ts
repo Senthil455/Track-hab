@@ -14,11 +14,9 @@ import { habSafe } from "../lib/habiticaQueue.js";
 import { addAppointment } from "../connectors/habitica.js";
 import { sendChatworkMessage, cwApptText } from "../connectors/chatwork.js";
 import { hasSeen, markSeen } from "../lib/seen.js";
-import {
-  getObservedLabelIds,
-  getObservedLabelTitles,
-  getLabelItems,
-} from "../store/labels.js";
+
+// ★  * ,
+import * as lbl from "../store/labels.js";
 
 const asStr = (v: unknown) => "" + (v ?? "");
 const lc = (v: unknown) => asStr(v).toLowerCase();
@@ -44,8 +42,6 @@ export type Normalized = {
   raw?: any;       // HubSpot
   tenant?: string; //  default
 };
-
-/* =========  ========= */
 
 /** HubSpot  ID  */
 function pickHubSpotLikeIds(raw: any): string[] {
@@ -79,10 +75,19 @@ function pickHubSpotLikeIds(raw: any): string[] {
 
 /** UI items . observed  ID/. */
 async function loadUiLabels(tenant: string): Promise<LabelItem[]> {
-  const [itemsRaw, idsRaw, titlesRaw] = await Promise.all([
-    getLabelItems(tenant).catch(() => null),
-    getObservedLabelIds(tenant).catch(() => null),
-    getObservedLabelTitles(tenant).catch(() => null),
+  // --- getLabelItems “”. ---
+  let itemsRaw: any = null;
+  try {
+    const getItemsFn: any = (lbl as any).getLabelItems;
+    if (typeof getItemsFn === "function") {
+      itemsRaw = await getItemsFn(tenant).catch(() => null);
+    }
+  } catch {}
+
+  // observed ( optional call )
+  const [idsRaw, titlesRaw] = await Promise.all([
+    (lbl as any).getObservedLabelIds?.(tenant).catch(() => null) ?? null,
+    (lbl as any).getObservedLabelTitles?.(tenant).catch(() => null) ?? null,
   ]);
 
   const items = arr(itemsRaw);
@@ -222,7 +227,7 @@ async function awardXpForLabel(ev: Normalized, it: LabelItem) {
     return;
   }
   await habSafe(async () => {
-    await addAppointment(cred, xp, asStr(badge)); // addAppointment XP
+    await addAppointment(cred, xp, asStr(badge));
     return undefined as any;
   });
 }
