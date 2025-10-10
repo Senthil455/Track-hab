@@ -1,4 +1,6 @@
 // @ts-nocheck
+// src/features/appointment.ts
+
 import {
   APPOINTMENT_BADGE_LABEL,
   APPOINTMENT_VALUES,
@@ -21,12 +23,130 @@ import {
 const asStr = (v: unknown) => "" + (v ?? "");
 const lc = (v: unknown) => asStr(v).toLowerCase();
 const arr = (v: any): any[] =>
-  Array.isArray(v) ? v : v && Array.isArray(v.items) ? v.items : [];
+  Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : []);
 
-type LabelItem = { id?: string; title?: string; category?: string; enabled?: boolean; xp?: number; badge?: string; };
-export type Normalized = { source: "v3" | "workflow" | "zoom"; eventId?: any; callId?: any; outcome?: string; occurredAt?: any; raw?: any; tenant?: string; };
+/* =========  ========= */
+type LabelItem = {
+  id?: string;
+  title?: string;
+  category?: string; // "appointment" | "label"
+  enabled?: boolean;
+  xp?: number;
+  badge?: string;
+};
 
-/* --- :pickHubSpotLikeIds / loadUiLabels / uniq / matchUiLabels / matchEnvAppointment  --- */
+export type Normalized = {
+  source: "v3" | "workflow" | "zoom";
+  eventId?: any;
+  callId?: any;
+  outcome?: string;
+  occurredAt?: any;
+  raw?: any;       // HubSpot
+  tenant?: string; //  default
+};
+
+/* =========  ========= */
+
+/** HubSpot  ID  */
+function pickHubSpotLikeIds(raw: any): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(push);
+    else if (v !== null && v !== undefined) out.push(asStr(v));
+  };
+  if (!raw) return out;
+  try {
+    push(raw.labelId);
+    push(raw.labelIds);
+    push(raw.hs_label_id);
+    push(raw.hs_outcome_id);
+    push(raw.hs_pipeline_stage);
+    push(raw.hs_task_type_id);
+    push(raw.hs_dealstage);
+    if (raw.properties) {
+      const p = raw.properties;
+      push(p.labelId);
+      push(p.labelIds);
+      push(p.hs_label_id);
+      push(p.hs_outcome_id);
+      push(p.hs_pipeline_stage);
+      push(p.hs_task_type_id);
+      push(p.hs_dealstage);
+    }
+  } catch {}
+  return out.filter(Boolean).map(asStr);
+}
+
+/** UI items . observed  ID/. */
+async function loadUiLabels(tenant: string): Promise<LabelItem[]> {
+  const [itemsRaw, idsRaw, titlesRaw] = await Promise.all([
+    getLabelItems(tenant).catch(() => null),
+    getObservedLabelIds(tenant).catch(() => null),
+    getObservedLabelTitles(tenant).catch(() => null),
+  ]);
+
+  const items = arr(itemsRaw);
+  if (items.length) {
+    return items.map((it: any) => ({
+      id: it?.id ? asStr(it.id) : undefined,
+      title: it?.title ? asStr(it.title) : undefined,
+      category: it?.category ? lc(it.category) : (it?.title || it?.id ? "appointment" : "label"),
+      enabled: it?.enabled !== false,
+      xp: Number.isFinite(Number(it?.xp)) ? Math.max(0, Math.floor(Number(it?.xp))) : undefined,
+      badge: it?.badge ? asStr(it.badge) : undefined,
+    }));
+  }
+
+  // :observed  ID/
+  const ids = arr(idsRaw).map(asStr);
+  const titles = arr(titlesRaw).map(asStr);
+  return [
+    ...ids.map((id) => ({ id, category: "appointment", enabled: true } as LabelItem)),
+    ...titles.map((title) => ({ title, category: "appointment", enabled: true } as LabelItem)),
+  ];
+}
+
+function uniq(items: LabelItem[]): LabelItem[] {
+  const seen = new Set<string>();
+  const out: LabelItem[] = [];
+  for (const it of items) {
+    const key = `${lc(it.category || "label")}|${asStr(it.id || "").trim()}|${lc(asStr(it.title || ""))}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
+/** UI outcome  / id  */
+async function matchUiLabels(tenant: string, outcomeText: string, idCands: string[]): Promise<LabelItem[]> {
+  const items = await loadUiLabels(tenant);
+  const outcomeLc = lc(outcomeText).trim();
+  const matched: LabelItem[] = [];
+  for (const it of items) {
+    if (it.enabled === false) continue;
+    const byId = it.id && idCands.includes(asStr(it.id));
+    const byTitle = it.title && outcomeLc && outcomeLc === lc(it.title);
+    if (byId || byTitle) {
+      matched.push({
+        ...it,
+        category: lc(it.category || "label"),
+        xp: Number.isFinite(Number(it.xp)) ? Math.max(0, Math.floor(Number(it.xp))) : undefined,
+      });
+    }
+  }
+  return uniq(matched);
+}
+
+/** ENV(APPOINTMENT_VALUES) appointment */
+function matchEnvAppointment(outcomeText: string): boolean {
+  const t = lc(outcomeText).trim();
+  const envValsRaw: any = APPOINTMENT_VALUES;
+  const envVals = Array.isArray(envValsRaw)
+    ? envValsRaw
+    : (typeof envValsRaw === "string" ? envValsRaw.split(",") : []);
+  return !!t && envVals.map(lc).includes(t);
+}
 
 /** appointment1(tenant) */
 async function recordAppointmentEvent(ev: Normalized) {
@@ -42,7 +162,7 @@ async function recordAppointmentEvent(ev: Normalized) {
   });
 }
 
-/** : */
+/* =========  ========= */
 export async function handleNormalizedEvent(ev: Normalized) {
   const id = ev.eventId ?? ev.callId;
   if (hasSeen(id)) return;
@@ -58,7 +178,7 @@ export async function handleNormalizedEvent(ev: Normalized) {
   const hasUiAppointment = matched.some((m) => (m.category || "appointment") === "appointment");
   const xpItems = matched.filter((m) => (m.xp ?? 0) > 0);
 
-  // --- "appointment" ---
+  // "appointment"
   if (hasUiAppointment || envAppt) {
     await recordAppointmentEvent(ev);
   }
@@ -72,7 +192,7 @@ export async function handleNormalizedEvent(ev: Normalized) {
     await notifyChatworkAppointment(ev);
   }
 
-  // ()
+  // 
   if (matched.length) {
     await recordLabelEvents(ev, matched);
   } else {
@@ -80,6 +200,7 @@ export async function handleNormalizedEvent(ev: Normalized) {
   }
 }
 
+/* =========  ========= */
 async function awardXpForLabel(ev: Normalized, it: LabelItem) {
   const who = resolveActor({ source: ev.source as any, raw: ev.raw });
   const cred = getHabitica(who.email);
@@ -100,7 +221,10 @@ async function awardXpForLabel(ev: Normalized, it: LabelItem) {
     log(`[XP] label '${badge}' +${xp}XP (DRY_RUN or no-cred) callId=${ev.callId} by=${who.name}`);
     return;
   }
-  await habSafe(async () => { await addAppointment(cred, xp, asStr(badge)); return undefined as any; });
+  await habSafe(async () => {
+    await addAppointment(cred, xp, asStr(badge)); // addAppointment XP
+    return undefined as any;
+  });
 }
 
 async function awardXpForAppointment(ev: Normalized) {
@@ -111,11 +235,17 @@ async function awardXpForAppointment(ev: Normalized) {
     log(`[XP] appointment +${APPOINTMENT_XP}XP (DRY_RUN or no-cred) callId=${ev.callId} by=${who.name}`);
     return;
   }
-  await habSafe(async () => { await addAppointment(cred, APPOINTMENT_XP, APPOINTMENT_BADGE_LABEL); return undefined as any; });
+  await habSafe(async () => {
+    await addAppointment(cred, APPOINTMENT_XP, APPOINTMENT_BADGE_LABEL);
+    return undefined as any;
+  });
 }
 
 async function notifyChatworkAppointment(ev: Normalized) {
-  try { const who = resolveActor({ source: ev.source as any, raw: ev.raw }); await sendChatworkMessage(cwApptText(who.name)); } catch {}
+  try {
+    const who = resolveActor({ source: ev.source as any, raw: ev.raw });
+    await sendChatworkMessage(cwApptText(who.name));
+  } catch {}
 }
 
 async function recordLabelEvents(ev: Normalized, matched: LabelItem[]) {
