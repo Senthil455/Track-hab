@@ -35,6 +35,8 @@ import { labelsGet, labelsPut } from "./routes/labels.js";
 const app = express();
 app.set("x-powered-by", false);
 app.set("trust proxy", true);
+
+// JSON
 app.use(
   express.json({
     verify: (req: any, _res: any, buf: Buffer) => {
@@ -43,22 +45,16 @@ app.use(
   })
 );
 
-// ===== CORS:/admin/*, /tenant/*, /healthz  =====
+// === CORS: ( /tenant/* /admin/*) ===
 app.use((req, res, next) => {
-  if (
-    req.path.startsWith("/admin/") ||
-    req.path.startsWith("/tenant/") ||
-    req.path === "/healthz"
-  ) {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Authorization, Content-Type, X-Authorization"
-    );
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
-    res.setHeader("Access-Control-Max-Age", "86400");
-    if (req.method === "OPTIONS") return res.status(204).end();
-  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type, X-Authorization"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+  res.setHeader("Access-Control-Max-Age", "86400");
+  if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
 
@@ -66,7 +62,7 @@ app.use((req, res, next) => {
 app.get("/healthz", (_req, res) => {
   res.json({
     ok: true,
-    version: "2025-10-10-ui-rules-store",
+    version: "2025-10-10-ui-labels-v3",
     tz: process.env.TZ || "Asia/Tokyo",
     now: new Date().toISOString(),
     baseUrl: PUBLIC_BASE_URL || null,
@@ -79,13 +75,13 @@ app.get("/healthz", (_req, res) => {
 });
 app.get("/support", (_req, res) => res.type("text/plain").send("Support page"));
 
-// Webhooks
+// Webhooks()
 app.post("/webhooks/hubspot", hubspotWebhook);
 app.post("/webhooks/workflow", workflowWebhook);
 app.post("/webhooks/zoom", zoomWebhook);
 app.post("/webhooks/habitica", habiticaWebhook);
 
-// CSV
+// CSV()
 app.post(
   "/admin/csv/detect",
   express.text({ type: "text/csv", limit: "20mb" }),
@@ -97,16 +93,16 @@ app.post(
   csvUpsert
 );
 
-// Admin UI
+// Admin UI()
 app.get("/admin/dashboard", dashboardHandler);
 app.get("/admin/mapping", mappingHandler);
 
-// 
+// (UI)
 app.get("/tenant/:id/rules", rulesGet);
 app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
-app.get("/tenant/:id/stats/today", statsTodayBase);
+app.get("/tenant/:id/stats/today", statsTodayBase); // 
 
-// 
+// (UI)
 app.get("/tenant/:id/labels", labelsGet);
 app.put("/tenant/:id/labels", express.json({ limit: "1mb" }), labelsPut);
 

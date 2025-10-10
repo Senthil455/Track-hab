@@ -1,106 +1,140 @@
 // src/routes/rules.ts
-import { Request, Response } from "express";
-import fs from "fs";
+import type { Request, Response } from "express";
 import path from "path";
+import { promises as fs } from "fs";
 import {
-  AUTH_TOKEN,
   CALL_XP_PER_CALL,
-  CALL_XP_PER_5MIN,
   CALL_XP_UNIT_MS,
+  CALL_XP_PER_5MIN,
   APPOINTMENT_XP,
-  SALES_XP_STEP_YEN,
-  SALES_XP_PER_STEP,
 } from "../lib/env.js";
-import { isoDay, readJsonlAll } from "../lib/utils.js";
+import { log } from "../lib/utils.js";
 
-/** () */
-function defaultRules() {
+type Rules = {
+  xp: {
+    call: { perCall: number };
+    minutes: {
+      unitMs: number;
+      perUnitMs?: number;
+      per5min?: number;
+      list?: Array<{ min: number; xp: number }>;
+    };
+    appointment: { xp: number; badge?: string };
+  };
+  approval: { enabled: boolean; xp: number; badge: string };
+  sales: { milestones: Array<{ amount: number; xp: number; badge?: string }> };
+};
+
+const RULES_DIR = path.resolve("data/rules");
+const safeTenant = (t: string | undefined) =>
+  String(t || "default").trim() || "default";
+
+function defaults(): Rules {
   return {
     xp: {
-      call: { perCall: CALL_XP_PER_CALL },
-      minutes: [{ everyMin: Math.round(CALL_XP_UNIT_MS / 60000), xp: CALL_XP_PER_5MIN, repeat: true }],
-      appointment: APPOINTMENT_XP,
-      approval: 30,
-      revenue: [{ per: SALES_XP_STEP_YEN, xp: SALES_XP_PER_STEP }],
+      call: { perCall: Number(CALL_XP_PER_CALL ?? 1) || 0 },
+      minutes: {
+        unitMs: Number(CALL_XP_UNIT_MS ?? 300000) || 300000,
+        perUnitMs: Number(CALL_XP_PER_5MIN ?? 2) || 0,
+        per5min: Number(CALL_XP_PER_5MIN ?? 2) || 0,
+        list: [{ min: 5, xp: Number(CALL_XP_PER_5MIN ?? 2) || 0 }],
+      },
+      appointment: { xp: Number(APPOINTMENT_XP ?? 20) || 0, badge: "🏅appointment" },
     },
-    badges: { makerAward: { enabled: true, cycle: "monthly", topN: 1 } },
-    limits: { dailyXpCap: 1000 },
+    approval: { enabled: true, xp: 0, badge: "approval" },
+    sales: { milestones: [] },
   };
 }
 
-const TENANT_DIR = path.join(process.cwd(), "data", "tenants");
-const ensureDir = (t: string) => fs.mkdirSync(path.join(TENANT_DIR, t), { recursive: true });
-const rulesFile = (t: string) => path.join(TENANT_DIR, t, "rules.json");
-
-/** Bearer( AUTH_TOKEN ) */
-function requireBearer(req: Request, res: Response): boolean {
-  const tok = (req.header("authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!AUTH_TOKEN) { res.status(500).json({ ok: false, error: "missing AUTH_TOKEN" }); return false; }
-  if (tok !== AUTH_TOKEN) { res.status(401).json({ ok: false, error: "auth" }); return false; }
-  return true;
+async function ensureDir() {
+  await fs.mkdir(RULES_DIR, { recursive: true }).catch(() => {});
 }
 
-/** GET /tenant/:id/rules … , */
-export function rulesGet(req: Request, res: Response) {
-  if (!requireBearer(req, res)) return;
-  const tenant = String(req.params.id || "default");
-  const fp = rulesFile(tenant);
-  if (fs.existsSync(fp)) {
-    const json = JSON.parse(fs.readFileSync(fp, "utf8") || "{}");
-    res.json(json);
-  } else {
-    res.json(defaultRules());
+async function readRulesFile(tenant: string): Promise<Rules> {
+  await ensureDir();
+  const file = path.resolve(RULES_DIR, `${safeTenant(tenant)}.json`);
+  try {
+    const txt = await fs.readFile(file, "utf8");
+    const j = JSON.parse(txt || "{}");
+    return normalizeRules(j);
+  } catch {
+    return defaults();
   }
 }
-
-/** PUT /tenant/:id/rules … () */
-export function rulesPut(req: Request, res: Response) {
-  if (!requireBearer(req, res)) return;
-  const tenant = String(req.params.id || "default");
-  ensureDir(tenant);
-  fs.writeFileSync(rulesFile(tenant), JSON.stringify(req.body ?? {}, null, 2));
-  res.json({ ok: true });
+async function writeRulesFile(tenant: string, body: any): Promise<Rules> {
+  await ensureDir();
+  const file = path.resolve(RULES_DIR, `${safeTenant(tenant)}.json`);
+  const out = normalizeRules(body || {});
+  await fs.writeFile(file, JSON.stringify(out, null, 2));
+  return out;
 }
 
-/** ()HUD :GET /tenant/:id/stats/today
- *  events JSONL..
- */
-export function statsToday(req: Request, res: Response) {
-  if (!requireBearer(req, res)) return;
-  const tenant = String(req.params.id || "default");
-  const today = isoDay();
+// 
+function normalizeRules(b: any): Rules {
+  const d = defaults();
+  const r: Rules = d;
 
-  const calls = readJsonlAll("data/events/calls.jsonl").filter((x: any) => x.day === today);
-  const appts = readJsonlAll("data/events/appointments.jsonl").filter((x: any) => x.day === today);
-  const apprs = readJsonlAll("data/events/approvals.jsonl").filter((x: any) => x.day === today);
-  const sales = readJsonlAll("data/events/sales.jsonl").filter((x: any) => x.day === today);
+  // call
+  r.xp.call.perCall = Math.max(0, Number(b?.xp?.call?.perCall ?? r.xp.call.perCall) || 0);
 
-  const minutes = Math.round(calls.reduce((s: number, c: any) => s + (c.ms || 0) / 60000, 0));
-  const revenue = sales.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+  // 
+  const list = Array.isArray(b?.xp?.minutes?.list)
+    ? b.xp.minutes.list
+    : [{ min: Math.max(1, Math.floor((b?.xp?.minutes?.unitMs ?? r.xp.minutes.unitMs) / 60000)), xp: Number(b?.xp?.minutes?.perUnitMs ?? r.xp.minutes.perUnitMs) || 0 }];
 
-  //  or ()
-  let rules = defaultRules();
-  const fp = rulesFile(tenant);
-  if (fs.existsSync(fp)) rules = JSON.parse(fs.readFileSync(fp, "utf8") || "{}");
-  const target = rules?.limits?.dailyXpCap ?? 1000;
+  const head = list[0] || { min: 5, xp: 0 };
+  r.xp.minutes.unitMs = Math.max(60000, Number(head.min) * 60000);
+  r.xp.minutes.perUnitMs = Math.max(0, Number(head.xp) || 0);
+  r.xp.minutes.per5min =
+    head.min === 5 ? r.xp.minutes.perUnitMs : undefined;
+  r.xp.minutes.list = list.map((it: any) => ({
+    min: Math.max(1, Number(it?.min) || 1),
+    xp: Math.max(0, Number(it?.xp) || 0),
+  }));
 
-  // “XP”()
-  const xpFromCalls = (rules?.xp?.call?.perCall || 0) * calls.length;
-  const everyMin = rules?.xp?.minutes?.[0]?.everyMin || 5;
-  const perMinXp = rules?.xp?.minutes?.[0]?.xp || 0;
-  const xpFromMinutes = Math.floor(minutes / everyMin) * perMinXp;
-  const xpFromAppt = (rules?.xp?.appointment || 0) * appts.length;
-  const xpFromApproval = (rules?.xp?.approval || 0) * apprs.length;
-  const step = rules?.xp?.revenue?.[0]?.per || 100000;
-  const stepXp = rules?.xp?.revenue?.[0]?.xp || 50;
-  const xpFromRevenue = Math.floor(revenue / step) * stepXp;
+  // appointment
+  r.xp.appointment.xp = Math.max(
+    0,
+    Number(b?.xp?.appointment?.xp ?? r.xp.appointment.xp) || 0
+  );
+  r.xp.appointment.badge = String(
+    (b?.xp?.appointment?.badge ?? r.xp.appointment.badge) || ""
+  );
 
-  res.json({
-    xp: { current: xpFromCalls + xpFromMinutes + xpFromAppt + xpFromApproval + xpFromRevenue, target },
-    calls: calls.length,
-    minutes,
-    appointments: appts.length,
-    approvals: apprs.length,
-    revenue,
-  });
+  // approval
+  r.approval.enabled = !!(b?.approval?.enabled ?? r.approval.enabled);
+  r.approval.xp = Math.max(0, Number(b?.approval?.xp ?? r.approval.xp) || 0);
+  r.approval.badge = String(
+    (b?.approval?.badge ?? r.approval.badge) || "approval"
+  );
+
+  // sales
+  const ms = Array.isArray(b?.sales?.milestones)
+    ? b.sales.milestones
+    : r.sales.milestones;
+  r.sales.milestones = ms.map((m: any) => ({
+    amount: Math.max(0, Number(m?.amount) || 0),
+    xp: Math.max(0, Number(m?.xp) || 0),
+    badge: m?.badge ? String(m.badge) : undefined,
+  }));
+
+  return r;
+}
+
+/** === HTTP === */
+export async function rulesGet(req: Request, res: Response) {
+  const tenant = safeTenant(req.params.id);
+  const data = await readRulesFile(tenant);
+  res.json(data);
+}
+export async function rulesPut(req: Request, res: Response) {
+  const tenant = safeTenant(req.params.id);
+  const body = req.body || {};
+  const saved = await writeRulesFile(tenant, body);
+  res.json(saved);
+}
+
+/** (UI.) */
+export async function statsToday(_req: Request, res: Response) {
+  res.json({ ok: true, items: [] });
 }
