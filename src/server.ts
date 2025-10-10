@@ -1,5 +1,7 @@
 // src/server.ts
 import express from "express";
+import path from "path"; // 
+
 import {
   PORT,
   DRY_RUN,
@@ -31,6 +33,47 @@ import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 // ()
 import { labelsGet, labelsPut } from "./routes/labels.js";
 
+/* =========================
+   ()
+   -  SGC_TOKENS (JSON)
+   - PUT 
+   ========================= */
+type AnyReq = any; // 
+
+function tenantFrom(req: AnyReq): string {
+  return String(req.params?.id || req.query?.tenant || "default").trim() || "default";
+}
+function getTokenFromHeaders(req: AnyReq): string {
+  const raw = req.get("authorization") || req.get("x-authorization") || "";
+  return raw.replace(/^Bearer\s+/i, "").trim();
+}
+function readTokenMap(): Record<string, string> {
+  try {
+    return JSON.parse(process.env.SGC_TOKENS || "{}");
+  } catch {
+    return {};
+  }
+}
+function requireEditorToken(req: AnyReq, res: AnyReq, next: AnyReq) {
+  const tMap = readTokenMap();
+  const tenant = tenantFrom(req);
+  const token = getTokenFromHeaders(req);
+  const expected = tMap[tenant] || tMap["*"]; //  * 
+  if (!expected) return res.status(401).json({ ok: false, error: "no-token-config" });
+  if (token !== expected) return res.status(401).json({ ok: false, error: "bad-token" });
+  next();
+}
+// ()GET ..
+// function requireViewerToken(req: AnyReq, res: AnyReq, next: AnyReq) {
+//   const tMap = readTokenMap();
+//   const tenant = tenantFrom(req);
+//   const token = getTokenFromHeaders(req);
+//   const viewer = tMap["*"]; //  * ()
+//   if (!viewer) return res.status(401).json({ ok: false, error: "no-viewer-token" });
+//   if (token !== viewer) return res.status(401).json({ ok: false, error: "bad-token" });
+//   next();
+// }
+
 /*  */
 const app = express();
 app.set("x-powered-by", false);
@@ -57,6 +100,14 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
+
+/* ===== :(1UI) =====
+   public-admin/console.html / console.js 
+   https://<host>/admin/console/  */
+app.use(
+  "/admin/console",
+  express.static(path.join(__dirname, "..", "public-admin"))
+);
 
 /* Health / Support */
 app.get("/healthz", (_req, res) => {
@@ -97,14 +148,14 @@ app.post(
 app.get("/admin/dashboard", dashboardHandler);
 app.get("/admin/mapping", mappingHandler);
 
-// (UI)
+// (UI)— GET,PUT
 app.get("/tenant/:id/rules", rulesGet);
-app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
+app.put("/tenant/:id/rules", requireEditorToken, express.json({ limit: "1mb" }), rulesPut);
 app.get("/tenant/:id/stats/today", statsTodayBase); // 
 
-// (UI)
+// (UI)— GET,PUT
 app.get("/tenant/:id/labels", labelsGet);
-app.put("/tenant/:id/labels", express.json({ limit: "1mb" }), labelsPut);
+app.put("/tenant/:id/labels", requireEditorToken, express.json({ limit: "1mb" }), labelsPut);
 
 /* Start */
 app.listen(PORT, () => {
