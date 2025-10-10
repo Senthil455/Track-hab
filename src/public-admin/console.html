@@ -7,29 +7,26 @@
 </head>
 <body>
 <script>
-// --- :GM_addStyle  / URL tenant/token/base  ---
+/* ===== :GM_addStyle polyfill &  (#tenant/#token/#base) ===== */
 (function(){
   // GM_addStyle polyfill(TamperMonkey)
   window.GM_addStyle = window.GM_addStyle || function(css){
-    try { const s=document.createElement('style'); s.textContent=css; document.head.appendChild(s); } catch(_){}
+    try{ const s=document.createElement('style'); s.textContent=css; document.head.appendChild(s); }catch(_){}
   };
-
-  // : #tenant=...&token=...&base=...  localStorage 
-  try {
+  // URL → localStorage("sgc.profile.v3") 
+  try{
     const q = new URLSearchParams(location.hash.slice(1));
     const tenant = q.get('tenant') || 'default';
     const token  = q.get('token')  || '';
-    // base ()
     const base   = (q.get('base') ?? '').trim();
     const baseUrl = base === '' ? location.origin : base;
-
     const profile = { tenant, baseUrl, token };
     localStorage.setItem("sgc.profile.v3", JSON.stringify(profile));
-  } catch(_){}
+  }catch(_){}
 })();
 </script>
 
-<!-- ▼▼  TamperMonkey (OK:) ▼▼ -->
+<!--  TamperMonkey  “”  -->
 <script>
 // ==UserScript==
 // @name         Sales Gamify Console (v2.3 UI: CSV)
@@ -107,12 +104,15 @@
     document.body.appendChild(fab);
   }
 
-  /* ====== (,TM) ====== */
+  /* ======  ====== */
   let profile={}, currentTab="score", rulesCache=null, labelsCache=null;
   let modal, bodyArea;
+
   function ensureModal(){
     if(document.getElementById("sgc-modal")) return;
+
     document.body.appendChild(h(`<div id="sgc-modal-mask"></div>`));
+
     modal = h(`
       <div id="sgc-modal" role="dialog" aria-modal="true" aria-label="Sales Gamify Console">
         <div class="sgc-hd">
@@ -197,6 +197,7 @@
     }catch(e){ toast("", true); }
   }
 
+  /* ======  &  ====== */
   async function loadAll(){
     ensureProfileFromInputs();
     if(!profile.baseUrl) return;
@@ -227,6 +228,7 @@
     }catch(e){ console.error(e); toast(": "+String(e), true); }
   }
 
+  /* ======  ====== */
   function render(){
     modal.querySelectorAll(".sgc-tab").forEach(t=>t.classList.toggle("active", t.dataset.tab===currentTab));
     bodyArea.innerHTML="";
@@ -248,11 +250,292 @@
     return r;
   }
 
-  /* ====== ,TM/ ====== */
-  // ...( renderScore / collectScoreToCaches / renderHub / collectHubToCache
-  //      / renderApprove / collectApproveToCache / renderCSV / renderDash )
-  // ,TM.
-  // ----  ----
+  /* ======  ====== */
+  function renderScore(){
+    const r=safeRules();
+    const perCall = Number(r?.xp?.call?.perCall ?? 1);
+    const unitMin = clamp(Math.round(Number(r?.xp?.minutes?.unitMs || 300000)/60000) || 5, 1, 60);
+    const perUnit = Number(r?.xp?.minutes?.perUnitMs ?? r?.xp?.minutes?.per5min ?? 2);
+    const list = Array.isArray(r?.xp?.minutes?.list) ? r.xp.minutes.list : [{min:unitMin,xp:perUnit}];
+    const apXP    = Number(r?.xp?.appointment?.xp ?? 20);
+    const apBadge = String(r?.xp?.appointment?.badge || "🏅appointment");
+
+    bodyArea.appendChild(h(`
+      <div class="sgc-row"><label> 1callXP</label>
+        <input id="sgc-xp-call" type="number" min="0" step="1" value="${perCall}">
+      </div>
+    `));
+
+    const box = h(`<div class="sgc-row"><label>XP</label>
+      <div class="sgc-bare">
+        <div id="sgc-minutes-list" class="sgc-list"></div>
+        <div style="margin-top:8px"><button id="sgc-add-min" class="sgc-btn"> </button>
+          <span class="sgc-help">※"1". <code>xp.minutes.list</code> .</span>
+        </div>
+      </div>
+    </div>`);
+    bodyArea.appendChild(box);
+
+    const listEl = box.querySelector("#sgc-minutes-list");
+    function pushMinuteRow(v){ listEl.appendChild(renderMinuteRow(v)); }
+    function renderMinuteRow(v){
+      const row = h(`<div class="sgc-row-compact">
+        <span></span><input class="sgc-min" type="number" min="1" value="${Number(v?.min)||5}" style="width:80px">
+        <span></span><input class="sgc-min-xp" type="number" min="0" value="${Number(v?.xp)||0}" style="width:120px"><span>XP</span>
+        <button class="sgc-btn sgc-del"></button>
+      </div>`);
+      row.querySelector(".sgc-del").addEventListener("click",()=>row.remove());
+      return row;
+    }
+    list.forEach(pushMinuteRow);
+    box.querySelector("#sgc-add-min").addEventListener("click",()=>pushMinuteRow({min:5,xp:0}));
+
+    bodyArea.appendChild(h(`
+      <div class="sgc-row"><label>:appointment(HubSpot)</label>
+        <div class="sgc-row-compact">
+          <input id="sgc-ap-xp" type="number" min="0" step="1" value="${apXP}" style="width:120px"> <span>XP</span>
+          <span style="width:10px"></span>
+          <span></span>
+          <input id="sgc-ap-badge" type="text" value="${apBadge}" placeholder=": 🏅appointment" style="width:260px">
+        </div>
+        <div class="sgc-help">"appointment"(Outcome).</div>
+      </div>
+    `));
+
+    bodyArea.appendChild(h(`
+      <div class="sgc-row"><label>Outcome(HubSpot)</label>
+        <div>
+          <div class="sgc-help">HubSpotID/,."/XP".</div>
+          <div id="sgc-custom-list" class="sgc-list"></div>
+          <div class="sgc-help">/"HubSpot".</div>
+        </div>
+      </div>
+    `));
+
+    const list2=bodyArea.querySelector("#sgc-custom-list");
+    ensureLabelsArray();
+    labelsCache.forEach(it=> list2.appendChild(renderCustomCard(it)));
+    if(labelsCache.length===0){
+      list2.appendChild(h(`<div class="sgc-help">※ ."HubSpot".</div>`));
+    }
+
+    function renderCustomCard(item){
+      const enabled = !!item.enabled;
+      const xp = Number.isFinite(Number(item.xp)) ? Number(item.xp) : "";
+      const badge = item.badge || "";
+      const el=h(`
+        <div class="sgc-card" data-id="${item.id||""}" data-title="${item.title||""}">
+          <div><label class="muted">ID</label><div><strong>${item.id||"()"}</strong></div></div>
+          <div><label class="muted"></label><div>${item.title||"()"}</div></div>
+          <div class="full" style="display:flex;gap:10px;align-items:center">
+            <label style="display:flex;gap:6px;align-items:center"><input class="sgc-en" type="checkbox" ${enabled?"checked":""}> </label>
+            <span>XP</span><input class="sgc-xp" type="number" min="0" step="1" value="${xp}" style="max-width:120px">
+            <span></span><input class="sgc-badge" type="text" value="${badge}" placeholder=": 🏷︎A " style="max-width:260px">
+          </div>
+        </div>
+      `);
+      return el;
+    }
+  }
+
+  function collectScoreToCaches(){
+    const r=safeRules();
+    r.xp.call.perCall = asNum(modal.querySelector("#sgc-xp-call")?.value,0);
+
+    const rows=[...modal.querySelectorAll("#sgc-minutes-list .sgc-row-compact")];
+    const list = rows.map(row=>({ min:asNum(row.querySelector(".sgc-min").value,5), xp:asNum(row.querySelector(".sgc-min-xp").value,0) }));
+    if(list.length===0) list.push({min:5,xp:0});
+    r.xp.minutes.unitMs = list[0].min*60*1000;
+    r.xp.minutes.perUnitMs = list[0].xp;
+    if(list[0].min===5) r.xp.minutes.per5min=list[0].xp; else delete r.xp.minutes.per5min;
+    r.xp.minutes.list = list;
+
+    r.xp.appointment.xp = asNum(modal.querySelector("#sgc-ap-xp")?.value,20);
+    r.xp.appointment.badge = String(modal.querySelector("#sgc-ap-badge")?.value||"");
+
+    const listEl=[...modal.querySelectorAll("#sgc-custom-list .sgc-card")];
+    listEl.forEach(card=>{
+      const id   = card.getAttribute("data-id")||"";
+      const tit  = card.getAttribute("data-title")||"";
+      const en   = card.querySelector(".sgc-en").checked;
+      const xp   = card.querySelector(".sgc-xp").value;
+      const bd   = card.querySelector(".sgc-badge").value;
+      const it = labelsCache.find(x=>(x.id||"")===(id||"") && (x.title||"")===(tit||""));
+      if(it){
+        it.enabled = !!en;
+        const v = Number(xp);
+        it.xp = Number.isFinite(v) ? v : undefined;
+        it.badge = String(bd||"") || undefined;
+      }
+    });
+
+    rulesCache=r;
+  }
+
+  /* ====== HubSpot() ====== */
+  function ensureLabelsArray(){ labelsCache = Array.isArray(labelsCache)? labelsCache : []; }
+
+  function renderHub(){
+    ensureLabelsArray();
+    bodyArea.appendChild(h(`<div class="sgc-help">HubSpot"ID""".,"".</div>`));
+
+    const area=h(`<div id="sgc-hub-list" class="sgc-list"></div>`);
+    bodyArea.appendChild(area);
+
+    const toolbar=h(`<div class="sgc-kv" style="margin:8px 0">
+        <button id="sgc-add-row" class="sgc-btn"> </button>
+        <button id="sgc-del-all" class="sgc-btn sgc-del"></button>
+      </div>`);
+    bodyArea.appendChild(toolbar);
+
+    labelsCache.forEach(it=> area.appendChild(renderHubRow(it)));
+    if(labelsCache.length===0){
+      area.appendChild(renderHubRow({id:"", title:""}));
+    }
+
+    bodyArea.querySelector("#sgc-add-row").addEventListener("click",()=> area.appendChild(renderHubRow({id:"", title:""})));
+    bodyArea.querySelector("#sgc-del-all").addEventListener("click",()=>{ labelsCache=[]; area.innerHTML=""; area.appendChild(renderHubRow({id:"", title:""})); });
+
+    function renderHubRow(item){
+      const row=h(`
+        <div class="sgc-card">
+          <div><label class="muted">HubSpot ID</label><input class="sgc-h-id" value="${item.id||""}" placeholder=": ac590467-..."></div>
+          <div><label class="muted">/</label><input class="sgc-h-title" value="${item.title||""}" placeholder=":  / A"></div>
+          <div class="full" style="display:flex;justify-content:flex-end">
+            <button class="sgc-btn sgc-del"></button>
+          </div>
+        </div>
+      `);
+      row.querySelector(".sgc-del").addEventListener("click",()=> row.remove());
+      if(item.enabled) row.setAttribute("data-enabled","1");
+      if(Number.isFinite(Number(item.xp))) row.setAttribute("data-xp", String(item.xp));
+      if(item.badge) row.setAttribute("data-badge", item.badge);
+      return row;
+    }
+  }
+
+  function collectHubToCache(){
+    const list=[...modal.querySelectorAll("#sgc-hub-list .sgc-card")];
+    const items=[];
+    for(const row of list){
+      const id = String(row.querySelector(".sgc-h-id")?.value||"").trim();
+      const title = String(row.querySelector(".sgc-h-title")?.value||"").trim();
+      if(!id && !title) continue;
+      items.push({
+        id, title,
+        enabled: row.getAttribute("data-enabled")==="1" ? true : undefined,
+        xp: Number.isFinite(Number(row.getAttribute("data-xp"))) ? Number(row.getAttribute("data-xp")) : undefined,
+        badge: row.getAttribute("data-badge") || undefined,
+      });
+    }
+    labelsCache = items;
+  }
+
+  /* ====== approvalsales(CSV) ====== */
+  function renderApprove(){
+    const r=safeRules();
+    const ap = r.approval || { enabled:true, xp:0, badge:"approval" };
+    const milestones = Array.isArray(r.sales?.milestones) ? r.sales.milestones : [];
+
+    bodyArea.appendChild(h(`
+      <div class="sgc-row"><label>approval(Approval)XP</label>
+        <div class="sgc-row-compact">
+          <input id="sgc-approve-xp" type="number" min="0" step="1" value="${Number(ap.xp)||0}" style="width:120px"> <span>XP</span>
+          <span></span><input id="sgc-approve-badge" type="text" value="${String(ap.badge||"approval")}" style="width:200px">
+          <label style="display:flex;gap:6px;align-items:center"><input id="sgc-approve-en" type="checkbox" ${ap.enabled!==false?"checked":""}> </label>
+        </div>
+      </div>
+    `));
+
+    const wrap=h(`<div class="sgc-row"><label>sales()</label>
+      <div class="sgc-bare">
+        <div id="sgc-ms-list" class="sgc-list"></div>
+        <div style="margin-top:8px"><button id="sgc-add-ms" class="sgc-btn"> </button></div>
+      </div>
+    </div>`);
+    bodyArea.appendChild(wrap);
+
+    const msList=wrap.querySelector("#sgc-ms-list");
+    function pushMsRow(v){ msList.appendChild(renderMsRow(v)); }
+    function renderMsRow(v){
+      const row=h(`<div class="sgc-row-compact">
+        <span>()</span><input class="sgc-ms-amt" type="number" min="0" value="${Number(v?.amount)||100000}" style="width:140px">
+        <span>XP</span><input class="sgc-ms-xp" type="number" min="0" value="${Number(v?.xp)||50}" style="width:120px">
+        <span></span><input class="sgc-ms-badge" type="text" value="${String(v?.badge||"sales"+(Number(v?.amount)||100000).toLocaleString()+"")}" style="width:240px">
+        <button class="sgc-btn sgc-del"></button>
+      </div>`);
+      row.querySelector(".sgc-del").addEventListener("click",()=>row.remove());
+      return row;
+    }
+    (milestones.length?milestones:[{amount:100000,xp:50,badge:"sales10"}]).forEach(pushMsRow);
+    wrap.querySelector("#sgc-add-ms").addEventListener("click",()=>pushMsRow({amount:100000,xp:50}));
+  }
+
+  function collectApproveToCache(){
+    const r=safeRules();
+    r.approval = {
+      enabled: !!modal.querySelector("#sgc-approve-en")?.checked,
+      xp: asNum(modal.querySelector("#sgc-approve-xp")?.value,0),
+      badge: String(modal.querySelector("#sgc-approve-badge")?.value||"approval")
+    };
+    const rows=[...modal.querySelectorAll("#sgc-ms-list .sgc-row-compact")];
+    r.sales = r.sales || {};
+    r.sales.milestones = rows.map(row=>({
+      amount: asNum(row.querySelector(".sgc-ms-amt").value,0),
+      xp: asNum(row.querySelector(".sgc-ms-xp").value,0),
+      badge: String(row.querySelector(".sgc-ms-badge").value||"")
+    }));
+    rulesCache=r;
+  }
+
+  /* ====== CSV ====== */
+  function renderCSV(){
+    const box=h(`
+      <div class="sgc-row"><label>CSV</label>
+        <div>
+          <div class="sgc-row-compact">
+            <input id="sgc-csv-file" type="file" accept=".csv">
+            <button id="sgc-upload" class="sgc-btn"></button>
+            <button id="sgc-open-admin" class="sgc-btn"></button>
+          </div>
+          <div class="sgc-help"> <code>/admin/upload</code> POST. <code>/admin/csv</code> → <code>/admin/import</code> . /admin .</div>
+        </div>
+      </div>
+    `);
+    bodyArea.appendChild(box);
+    box.querySelector("#sgc-upload").addEventListener("click", doUpload);
+    box.querySelector("#sgc-open-admin").addEventListener("click", ()=> window.open(`${baseURL()}/admin?tenant=${encodeURIComponent(tenant())}`,"_blank"));
+
+    async function doUpload(){
+      ensureProfileFromInputs();
+      const f=modal.querySelector("#sgc-csv-file")?.files?.[0];
+      if(!f){ toast("CSV", true); return; }
+      const tries=[ "/admin/upload", "/admin/csv", "/admin/import" ];
+      const form=new FormData(); form.append("file", f); form.append("tenant", tenant());
+      for(const path of tries){
+        try{
+          await apiPOSTForm(`${baseURL()}${path}`, form, profile);
+          toast("CSV");
+          return;
+        }catch(e){ console.warn("upload fail", path, e); }
+      }
+      toast("..", true);
+    }
+  }
+
+  /* ======  ====== */
+  function renderDash(){
+    const b=h(`
+      <div class="sgc-row"><label></label>
+        <div class="sgc-kv">
+          <button id="sgc-open-dash" class="sgc-btn"></button>
+          <div class="sgc-help">BaseURL  <code>/admin/dashboard?tenant=...</code> .</div>
+        </div>
+      </div>
+    `);
+    bodyArea.appendChild(b);
+    b.querySelector("#sgc-open-dash").addEventListener("click",()=> window.open(`${baseURL()}/admin/dashboard?tenant=${encodeURIComponent(tenant())}`,"_blank"));
+  }
 
   /* ======  ====== */
   function start(){ ensureFab(); }
@@ -260,16 +543,14 @@
   else window.addEventListener("load", start, {once:true});
 })();
 </script>
-<!-- ▲▲ TamperMonkey ▲▲ -->
 
+<!-- ,() -->
 <script>
-//  “” 
 (function openWhenReady(){
   const el = document.getElementById('sgc-fab');
   if (el) { el.click(); return; }
   setTimeout(openWhenReady, 100);
 })();
 </script>
-
 </body>
 </html>
