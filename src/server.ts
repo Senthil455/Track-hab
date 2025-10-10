@@ -66,7 +66,7 @@ app.use((req, res, next) => {
 app.get("/healthz", (_req, res) => {
   res.json({
     ok: true,
-    version: "2025-10-09-ui-labels-v2",
+    version: "2025-10-10-ui-rules-store",
     tz: process.env.TZ || "Asia/Tokyo",
     now: new Date().toISOString(),
     baseUrl: PUBLIC_BASE_URL || null,
@@ -106,7 +106,7 @@ app.get("/tenant/:id/rules", rulesGet);
 app.put("/tenant/:id/rules", express.json({ limit: "1mb" }), rulesPut);
 app.get("/tenant/:id/stats/today", statsTodayBase);
 
-// ()
+// 
 app.get("/tenant/:id/labels", labelsGet);
 app.put("/tenant/:id/labels", express.json({ limit: "1mb" }), labelsPut);
 
