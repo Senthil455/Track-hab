@@ -34,7 +34,7 @@ import { dashboardHandler, mappingHandler } from "./routes/admin.js";
 
 // ()
 import { labelsGet, labelsPut } from "./routes/labels.js";
-import { opsRouter } from "./routes/ops.js";
+import { opsApiRouter, opsRouter } from "./routes/ops.js";
 
 /* =========================
    ()
@@ -128,6 +128,7 @@ app.get("/admin/mapping", mappingHandler);
 
 /* Operations API() */
 app.use("/tenant", opsRouter);
+app.use("/ops", opsApiRouter);
 
 /* (UI)— GET,PUT */
 app.get("/tenant/:id/rules", rulesGet);
