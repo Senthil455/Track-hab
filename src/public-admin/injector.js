@@ -1,26 +1,26 @@
 // src/public-admin/injector.js
-// :⚙️ + ()
-// ..
+// Overlay Console + Hide-Gems ()
+// - : .
+// - :  iframe(overlay=1 UI"")
+// - : :has() + Fallback.UP
 
 (function () {
   const KEY = "sgc.profile.v3";
-  const zTop = 2147483646;
+  const zTop = 2147483600;
 
-  // ---- Profile: () ----
   try {
     const cur = JSON.parse(localStorage.getItem(KEY) || "null");
     if (!cur || !cur.baseUrl || !cur.tenant || !cur.token) {
-      const p = {
-        baseUrl: "https://sales-gamify.onrender.com",
-        tenant: "",
-        token: "wabisabi-habitica-hubspot-connection",
-      };
-      localStorage.setItem(KEY, JSON.stringify(p));
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          baseUrl: "https://sales-gamify.onrender.com",
+          tenant: "",
+          token: "wabisabi-habitica-hubspot-connection",
+        })
+      );
     }
-  } catch {
-    // ignore
-  }
-
+  } catch {}
   const p = (() => {
     try {
       return JSON.parse(localStorage.getItem(KEY) || "{}") || {};
@@ -29,85 +29,84 @@
     }
   })();
 
-  // ---- Overlay Console ----
   function consoleUrl() {
     const qs = new URLSearchParams({
       tenant: String(p.tenant || ""),
       token: String(p.token || ""),
       base: String(p.baseUrl || ""),
+      overlay: "1",
     });
     return String(p.baseUrl || "") + "/admin/console/#" + qs.toString();
   }
-
   function openOverlay() {
-    const old = document.getElementById("sgc-overlay");
-    if (old) old.remove();
-
+    closeOverlay();
     const mask = document.createElement("div");
     mask.id = "sgc-overlay";
-    mask.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.20);z-index:${zTop}`;
+    mask.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.30);z-index:${zTop}`;
 
     const fr = document.createElement("iframe");
     fr.src = consoleUrl();
     fr.allow = "clipboard-read; clipboard-write";
     fr.style.cssText =
-      "position:absolute;top:60px;left:50%;transform:translateX(-50%);width:min(1120px,94vw);height:86vh;border:0;border-radius:14px;background:#fff;box-shadow:0 24px 48px rgba(0,0,0,.25)";
+      "position:absolute;inset:0;width:100vw;height:100vh;border:0;border-radius:0;box-shadow:none;background:#fff";
 
-    const bt = document.createElement("button");
-    bt.textContent = "×";
-    bt.title = "";
-    bt.style.cssText =
-      "position:absolute;top:22px;right:22px;width:40px;height:40px;border:0;border-radius:10px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.2);font-size:22px;cursor:pointer";
-    bt.onclick = () => mask.remove();
+    const close = document.createElement("button");
+    close.textContent = "×";
+    close.title = "";
+    close.style.cssText = `position:fixed;top:14px;right:14px;width:40px;height:40px;border:0;border-radius:10px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.2);font-size:20px;cursor:pointer;z-index:${zTop + 2}`;
+    close.onclick = () => mask.remove();
 
-    mask.append(fr, bt);
+    mask.append(fr, close);
     document.body.appendChild(mask);
   }
-
+  function closeOverlay() {
+    const e = document.getElementById("sgc-overlay");
+    if (e) e.remove();
+  }
   function toggleOverlay() {
-    const cur = document.getElementById("sgc-overlay");
-    if (cur) cur.remove();
-    else openOverlay();
+    const e = document.getElementById("sgc-overlay");
+    e ? closeOverlay() : openOverlay();
   }
 
-  // ---- Gear Button ----
   function ensureGear() {
     if (document.getElementById("sgc-gear")) return;
-    const gear = document.createElement("div");
+    const gear = document.createElement("button");
     gear.id = "sgc-gear";
-    gear.textContent = "⚙️ ";
-    gear.title = "Sales Gamify Console";
+    gear.setAttribute("aria-label", "Sales Gamify Console");
+    gear.textContent = "⚙️";
     gear.style.cssText = [
       "position:fixed",
-      "top:110px",
-      "right:18px",
-      `z-index:${zTop}`,
+      "top:16px",
+      "right:16px",
+      `z-index:${zTop + 1}`,
+      "width:40px",
+      "height:40px",
+      "border-radius:20px",
       "background:#6c5ce7",
       "color:#fff",
-      "border-radius:14px",
-      "padding:10px 14px",
+      "border:none",
       "box-shadow:0 6px 18px rgba(0,0,0,.25)",
-      "font-weight:700",
-      "display:flex",
-      "gap:8px",
-      "align-items:center",
+      "font-size:18px",
+      "line-height:40px",
+      "text-align:center",
       "cursor:pointer",
       "user-select:none",
+      "opacity:.92",
     ].join(";");
+    gear.onmouseenter = () => (gear.style.opacity = "1");
+    gear.onmouseleave = () => (gear.style.opacity = ".92");
     gear.onclick = toggleOverlay;
     document.body.appendChild(gear);
   }
 
-  // ---- Hide Gem-paid items (shop & optional rewards) ----
   function installHideGems() {
-    if (window.__hideGemsUnmount) return; // already installed
+    if (window.__hideGemsUnmount) return;
 
     const HCLS = "x-hide-gem-paid";
     const STYLE_ID = "x-hide-gem-style";
     const BTN_ID = "x-hide-gem-btn";
-    let mo = null;
 
-    function addStyle(txt, id) {
+    const addStyle = (txt, id) => {
       let s = document.getElementById(id);
       if (!s) {
         s = document.createElement("style");
@@ -115,15 +114,14 @@
         document.head.appendChild(s);
       }
       s.textContent = txt;
-    }
-
-    function rm(id) {
+    };
+    const rm = (id) => {
       const el = document.getElementById(id);
       if (el) el.remove();
-    }
+    };
 
-    function candidates() {
-      return document.querySelectorAll(
+    const candidates = () =>
+      document.querySelectorAll(
         `
         [data-page='shops'] li,
         [data-page='shops'] .item,
@@ -131,117 +129,105 @@
         .market li, .market .item,
         .shop .item, .items .item,
         [data-test="shopItem"],
-        [class*="shop-item"], [class*="grid-item"], [class*="ItemCard"]
-      `.trim()
+        [class*="shop-item"], [class*="grid-item"], [class*="ItemCard"], [class*="ItemTile"]
+      `
       );
-    }
-
-    function markGemCard(root) {
-      const txt = root.textContent || "";
-      const isGem =
-        !!(
-          root.querySelector(
-            '[data-test*="gem" i],[data-testid*="gem" i],[aria-label*="Gem" i],[aria-label*=""]'
-          ) ||
-          root.querySelector('svg[class*="gem" i],svg[aria-label*="Gem" i]') ||
-          root.querySelector('img[alt*="Gem" i],img[alt*=""]') ||
-          /(^|[^a-z])gem(s)?([^a-z]|$)/i.test(txt) ||
-          txt.indexOf("") >= 0
-        );
-      if (isGem) root.classList.add(HCLS);
-    }
-
-    function sweep() {
+    const isGemCard = (root) => {
+      if (root.querySelector('[data-test*="gem" i],[data-testid*="gem" i]')) return true;
+      if (root.querySelector('[aria-label*="Gem" i],[aria-label*=""]')) return true;
+      if (root.querySelector('svg[class*="gem" i],svg[aria-label*="Gem" i]')) return true;
+      if (root.querySelector('img[alt*="Gem" i],img[alt*=""]')) return true;
+      const txt = (root.textContent || "").replace(/\s+/g, " ").trim();
+      if (/([^a-z]|^)gem(s)?([^a-z]|$)/i.test(txt)) return true;
+      if (txt.includes("") || txt.includes("💎")) return true;
+      return false;
+    };
+    const markGemCard = (root) => {
+      const card =
+        root.closest('li,.item,.shop-item,.grid-item,[class*="Item"],[class*="card"]') || root;
+      if (card && !card.classList.contains(HCLS) && isGemCard(card)) {
+        card.classList.add(HCLS);
+      }
+    };
+    const sweep = () => {
       let n = 0;
       candidates().forEach((el) => {
-        const card =
-          el.closest(
-            'li,.item,.shop-item,.grid-item,[class*="Item"],[class*="card"],[data-test="shopItem"]'
-          ) || el;
-        if (!card || card.classList.contains(HCLS)) return;
-        markGemCard(card);
-        if (card.classList.contains(HCLS)) n++;
+        markGemCard(el);
+        if (el.classList.contains(HCLS)) n++;
       });
       return n;
-    }
+    };
 
-    function unmount() {
-      if (mo) mo.disconnect();
-      rm(STYLE_ID);
-      const b = document.getElementById(BTN_ID);
-      if (b && b.parentNode) b.parentNode.removeChild(b);
-      document.querySelectorAll("." + HCLS).forEach((x) => x.classList.remove(HCLS));
-      delete window.__hideGemsUnmount;
-    }
-
-    window.__hideGemsUnmount = unmount;
-
-    function addRestoreButton() {
-      if (document.getElementById(BTN_ID)) return;
-      const b = document.createElement("button");
-      b.id = BTN_ID;
-      b.textContent = "💎 Paid hidden (click to restore)";
-      Object.assign(b.style, {
-        position: "fixed",
-        right: "16px",
-        bottom: "16px",
-        zIndex: zTop + 1,
-        padding: "6px 10px",
-        borderRadius: "10px",
-        border: "none",
-        background: "#3a7",
-        color: "#fff",
-        fontSize: "12px",
-        boxShadow: "0 2px 8px rgba(0,0,0,.25)",
-        cursor: "pointer",
-      });
-      b.onclick = unmount;
-      document.body.appendChild(b);
-    }
-
-    let hasHas = false;
+    let supportsHas = false;
     try {
-      hasHas = !!(CSS && CSS.supports && CSS.supports("selector(:has(*))"));
+      supportsHas = !!(CSS && CSS.supports && CSS.supports("selector(:has(*))"));
     } catch {
-      hasHas = false;
+      supportsHas = false;
     }
-
-    if (hasHas) {
+    if (supportsHas) {
       addStyle(
         `
         [data-page='shops'] .items-list > *:has([data-test*="gem" i],[data-testid*="gem" i],[aria-label*="Gem" i],[aria-label*=""]),
         [data-page='shops'] .item:has([data-test*="gem" i],[data-testid*="gem" i],[aria-label*="Gem" i],[aria-label*=""]),
         .task-column--rewards *:has([data-test*="gem" i],[data-testid*="gem" i],[aria-label*="Gem" i],[aria-label*=""])
         { display:none !important; }
-      `.trim(),
+      `,
         STYLE_ID
       );
-      addRestoreButton();
-      return;
+    } else {
+      addStyle(`.${HCLS}{display:none!important}`, STYLE_ID);
+      const mo = new MutationObserver(() => sweep());
+      mo.observe(document.body, { subtree: true, childList: true });
+      sweep();
     }
 
-    addStyle("." + HCLS + "{display:none!important}", STYLE_ID);
-    mo = new MutationObserver(() => sweep());
-    mo.observe(document.body, { subtree: true, childList: true });
-    sweep();
-    addRestoreButton();
+    const addToggle = () => {
+      if (document.getElementById(BTN_ID)) return;
+      const b = document.createElement("button");
+      b.id = BTN_ID;
+      b.textContent = "💎 : ON()";
+      Object.assign(b.style, {
+        position: "fixed",
+        top: "64px",
+        right: "16px",
+        zIndex: zTop + 1,
+        padding: "8px 12px",
+        borderRadius: "18px",
+        border: "none",
+        background: "#16a34a",
+        color: "#fff",
+        fontSize: "13px",
+        boxShadow: "0 2px 8px rgba(0,0,0,.25)",
+        cursor: "pointer",
+      });
+      b.onclick = () => {
+        rm(STYLE_ID);
+        document.querySelectorAll("." + HCLS).forEach((x) => x.classList.remove(HCLS));
+        b.remove();
+        delete window.__hideGemsUnmount;
+      };
+      document.body.appendChild(b);
+    };
+    window.__hideGemsUnmount = () => {
+      rm(STYLE_ID);
+      const b = document.getElementById(BTN_ID);
+      if (b) b.remove();
+      document.querySelectorAll("." + HCLS).forEach((x) => x.classList.remove(HCLS));
+      delete window.__hideGemsUnmount;
+    };
+    addToggle();
   }
 
-  // ---- Boot ----
   function boot() {
     ensureGear();
     const mo = new MutationObserver(() => ensureGear());
     mo.observe(document.documentElement, { childList: true, subtree: true });
-
-    installHideGems(); // ()
-    toggleOverlay(); // 
+    installHideGems();
   }
 
-  // 1,
   if (!window.__SGC_LOADED__) {
     window.__SGC_LOADED__ = true;
     boot();
-  } else {
-    toggleOverlay();
   }
+  toggleOverlay();
 })();
